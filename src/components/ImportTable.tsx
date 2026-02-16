@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ImagePreviewDialog } from "@/components/ImagePreviewDialog";
+import { SendApprovalDialog, WebhookProduct } from "@/components/SendApprovalDialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -53,9 +54,10 @@ export function ImportTable({
 }: ImportTableProps) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [previewImport, setPreviewImport] = useState<Import | null>(null);
+  const [approvalImport, setApprovalImport] = useState<Import | null>(null);
   const { toast } = useToast();
 
-  const handleTriggerWebhook = async (imp: Import) => {
+  const handleTriggerWebhook = async (imp: Import, products: WebhookProduct[]) => {
     const url = imp.webhook_url || webhookUrl;
     if (!url) {
       toast({
@@ -83,10 +85,7 @@ export function ImportTable({
           import_id: imp.id,
           batch_name: imp.batch_name,
           timestamp: imp.created_at,
-          images: imp.import_images.map((img) => ({
-            file_name: img.file_name,
-            file_url: img.file_url,
-          })),
+          products: products,
         }),
       });
 
@@ -219,7 +218,7 @@ export function ImportTable({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleTriggerWebhook(imp)}
+                        onClick={() => setApprovalImport(imp)}
                         disabled={
                           sendingId === imp.id || imp.status === "processing"
                         }
@@ -244,6 +243,19 @@ export function ImportTable({
         onOpenChange={() => setPreviewImport(null)}
         images={previewImport?.import_images || []}
         batchName={previewImport?.batch_name || "Import"}
+      />
+
+      <SendApprovalDialog
+        open={!!approvalImport}
+        onOpenChange={(open) => {
+          if (!open) setApprovalImport(null);
+        }}
+        imp={approvalImport}
+        onApprove={(imp, products) => {
+          setApprovalImport(null);
+          handleTriggerWebhook(imp, products);
+        }}
+        isSending={sendingId === approvalImport?.id}
       />
     </>
   );
