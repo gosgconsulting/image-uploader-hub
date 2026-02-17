@@ -66,15 +66,17 @@ export function SendApprovalDialog({
   onApprove,
   isSending,
 }: SendApprovalDialogProps) {
-  const [loading, setLoading] = useState(false);
+ const [loading, setLoading] = useState(false);
   const [mappedProducts, setMappedProducts] = useState<MappedProduct[]>([]);
   const [rawProducts, setRawProducts] = useState<WebhookProduct[]>([]);
+  const [matchedProductsCount, setMatchedProductsCount] = useState(0);
   const { toast } = useToast();
 
   useEffect(() => {
     if (!open || !imp) {
       setMappedProducts([]);
       setRawProducts([]);
+      setMatchedProductsCount(0);
       return;
     }
 
@@ -99,15 +101,34 @@ export function SendApprovalDialog({
         });
 
         const data = await response.json();
-        const { filtered, grouped } = parseWebhookResponse(data);
-
+        const { filtered, grouped, unmatchedImages } = parseWebhookResponse(data, imp);
+      
         setRawProducts(filtered);
+        setMatchedProductsCount(grouped.length);
 
-        if (grouped.length > 0) {
-          setMappedProducts(grouped);
-        } else {
-          setMappedProducts(buildFallbackProducts(imp));
+        // Group unmatched images by base filename
+        const unmatchedGrouped = new Map<string, ImportImage[]>();
+        for (const img of unmatchedImages) {
+          // Extract base name (remove numbers in parentheses)
+          const baseName = img.file_name.replace(/\s*\(\d+\)\s*\./g, ".");
+          if (!unmatchedGrouped.has(baseName)) {
+            unmatchedGrouped.set(baseName, []);
+          }
+          unmatchedGrouped.get(baseName)!.push(img);
         }
+
+        // Combine grouped products with unmatched images (as "No Product Found")
+        const displayProducts = [
+          ...grouped,
+          ...Array.from(unmatchedGrouped.values()).map((imgGroup) => ({
+            shopify_product_name: "No Product Found",
+            sku: imgGroup[0].file_name.replace(/\s*\(\d+\)/g, ""),
+            productid: "",
+            images: imgGroup,
+          })),
+        ];
+
+        setMappedProducts(displayProducts);
       } catch {
         toast({
           title: "Failed to fetch product data",
@@ -115,6 +136,7 @@ export function SendApprovalDialog({
           variant: "destructive",
         });
         setRawProducts([]);
+        setMatchedProductsCount(0);
         setMappedProducts(buildFallbackProducts(imp));
       } finally {
         setLoading(false);
@@ -170,7 +192,7 @@ export function SendApprovalDialog({
                     return (
                       <TableRow key={index}>
                         <TableCell className="text-sm font-medium max-w-[200px]">
-                          <span className="line-clamp-2">
+                          <span className={` ${product.shopify_product_name == "No Product Found"? "text-red-600 line-clamp-2" : "line-clamp-2"}`}>
                             {product.shopify_product_name}
                           </span>
                         </TableCell>
@@ -240,7 +262,7 @@ export function SendApprovalDialog({
           </Button>
           <Button
             onClick={() => onApprove(imp, rawProducts)}
-            disabled={isSending || loading}
+            disabled={isSending || loading || matchedProductsCount === 0}
           >
             {isSending ? (
               <>
@@ -248,7 +270,7 @@ export function SendApprovalDialog({
                 Sending…
               </>
             ) : (
-              `Approve & Send (${mappedProducts.length})`
+              `Approve & Send (${matchedProductsCount})`
             )}
           </Button>
         </DialogFooter>
@@ -257,9 +279,10 @@ export function SendApprovalDialog({
   );
 }
 
-function parseWebhookResponse(data: unknown): {
+function parseWebhookResponse(data: unknown, imp: Import): {
   filtered: WebhookProduct[];
   grouped: MappedProduct[];
+  unmatchedImages: ImportImage[];
 } {
   try {
     // Response shape: { products: [...] } OR [{ products: [...] }]
@@ -274,9 +297,16 @@ function parseWebhookResponse(data: unknown): {
 
     // Filter out items that don't have a productid
     const filtered = products.filter((p) => p.productid);
-
-    if (filtered.length === 0) return { filtered: [], grouped: [] };
-
+  
+    if (filtered.length === 0) {
+      // All images are unmatched
+      return { 
+        filtered: [], 
+        grouped: [], 
+        unmatchedImages: imp.import_images 
+      };
+    }
+  
     // Group by productid so each unique product becomes one table row
     const groupedMap = new Map<string, WebhookProduct[]>();
     for (const item of filtered) {
@@ -284,7 +314,7 @@ function parseWebhookResponse(data: unknown): {
       if (!groupedMap.has(key)) groupedMap.set(key, []);
       groupedMap.get(key)!.push(item);
     }
-
+    
     const grouped = Array.from(groupedMap.values()).map((group) => ({
       shopify_product_name: group[0].productname,
       sku: group[0].file_name,
@@ -295,16 +325,22 @@ function parseWebhookResponse(data: unknown): {
       })),
     }));
 
-    return { filtered, grouped };
+    // Find unmatched images (those not in the filtered products)
+    const matchedImageIds = new Set(filtered.map((p) => p.id));
+    const unmatchedImages = imp.import_images.filter(
+      (img) => !matchedImageIds.has(img.id)
+    );
+
+    return { filtered, grouped, unmatchedImages };
   } catch {
-    return { filtered: [], grouped: [] };
+    return { filtered: [], grouped: [], unmatchedImages: [] };
   }
 }
 
 function buildFallbackProducts(imp: Import): MappedProduct[] {
   return [
     {
-      shopify_product_name: imp.batch_name || "Untitled Product",
+      shopify_product_name: "No Product Found",
       sku: `SKU-${imp.id.slice(0, 6).toUpperCase()}`,
       productid: "",
       images: imp.import_images.map((img) => ({
