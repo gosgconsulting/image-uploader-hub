@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ImagePreviewDialog } from "@/components/ImagePreviewDialog";
+import { SendApprovalDialog, WebhookProduct } from "@/components/SendApprovalDialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -36,24 +37,33 @@ interface ImportTableProps {
   onStatusChange: () => void;
 }
 
-const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+const statusVariant: Record<
+  string,
+  "default" | "secondary" | "destructive" | "outline"
+> = {
   pending: "outline",
   processing: "secondary",
   completed: "default",
   failed: "destructive",
 };
 
-export function ImportTable({ imports, webhookUrl, onStatusChange }: ImportTableProps) {
+export function ImportTable({
+  imports,
+  webhookUrl,
+  onStatusChange,
+}: ImportTableProps) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [previewImport, setPreviewImport] = useState<Import | null>(null);
+  const [approvalImport, setApprovalImport] = useState<Import | null>(null);
   const { toast } = useToast();
 
-  const handleTriggerWebhook = async (imp: Import) => {
+  const handleTriggerWebhook = async (imp: Import, products: WebhookProduct[]) => {
     const url = imp.webhook_url || webhookUrl;
     if (!url) {
       toast({
         title: "No webhook URL",
-        description: "Please configure a webhook URL in settings or on the import.",
+        description:
+          "Please configure a webhook URL in settings or on the import.",
         variant: "destructive",
       });
       return;
@@ -61,27 +71,40 @@ export function ImportTable({ imports, webhookUrl, onStatusChange }: ImportTable
 
     setSendingId(imp.id);
     try {
-      await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        mode: "no-cors",
-        body: JSON.stringify({
-          import_id: imp.id,
-          batch_name: imp.batch_name,
-          timestamp: imp.created_at,
-          images: imp.import_images.map((img) => ({
-            file_name: img.file_name,
-            file_url: img.file_url,
-          })),
-        }),
-      });
-
       await supabase
         .from("imports")
         .update({ status: "processing" })
         .eq("id", imp.id);
 
       onStatusChange();
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          import_id: imp.id,
+          batch_name: imp.batch_name,
+          timestamp: imp.created_at,
+          products: products,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data?.success) {
+        await supabase
+          .from("imports")
+          .update({ status: "completed" })
+          .eq("id", imp.id);
+      } else {
+        await supabase
+          .from("imports")
+          .update({ status: "failed" })
+          .eq("id", imp.id);
+        console.log("ERROR ==========>", data);
+      }
+      onStatusChange();
+
       toast({
         title: "Webhook triggered",
         description: "Import data sent. Check your automation tool for status.",
@@ -113,11 +136,21 @@ export function ImportTable({ imports, webhookUrl, onStatusChange }: ImportTable
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="font-mono text-xs uppercase tracking-wider">Date</TableHead>
-              <TableHead className="font-mono text-xs uppercase tracking-wider">Batch</TableHead>
-              <TableHead className="font-mono text-xs uppercase tracking-wider">Images</TableHead>
-              <TableHead className="font-mono text-xs uppercase tracking-wider">Status</TableHead>
-              <TableHead className="font-mono text-xs uppercase tracking-wider text-right">Actions</TableHead>
+              <TableHead className="font-mono text-xs uppercase tracking-wider">
+                Date
+              </TableHead>
+              <TableHead className="font-mono text-xs uppercase tracking-wider">
+                Batch
+              </TableHead>
+              <TableHead className="font-mono text-xs uppercase tracking-wider">
+                Images
+              </TableHead>
+              <TableHead className="font-mono text-xs uppercase tracking-wider">
+                Status
+              </TableHead>
+              <TableHead className="font-mono text-xs uppercase tracking-wider text-right">
+                Actions
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -127,7 +160,11 @@ export function ImportTable({ imports, webhookUrl, onStatusChange }: ImportTable
                   {format(new Date(imp.created_at), "MMM dd, HH:mm")}
                 </TableCell>
                 <TableCell className="text-sm">
-                  {imp.batch_name || <span className="text-muted-foreground italic">Untitled</span>}
+                  {imp.batch_name || (
+                    <span className="text-muted-foreground italic">
+                      Untitled
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
@@ -160,7 +197,10 @@ export function ImportTable({ imports, webhookUrl, onStatusChange }: ImportTable
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={statusVariant[imp.status] || "outline"} className="font-mono text-[10px] uppercase">
+                  <Badge
+                    variant={statusVariant[imp.status] || "outline"}
+                    className="font-mono text-[10px] uppercase"
+                  >
                     {imp.status}
                   </Badge>
                 </TableCell>
@@ -174,18 +214,22 @@ export function ImportTable({ imports, webhookUrl, onStatusChange }: ImportTable
                     >
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleTriggerWebhook(imp)}
-                      disabled={sendingId === imp.id || imp.status === "processing"}
-                    >
-                      {sendingId === imp.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Send className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
+                    {imp.status !== "completed" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setApprovalImport(imp)}
+                        disabled={
+                          sendingId === imp.id || imp.status === "processing"
+                        }
+                      >
+                        {sendingId === imp.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>
@@ -199,6 +243,19 @@ export function ImportTable({ imports, webhookUrl, onStatusChange }: ImportTable
         onOpenChange={() => setPreviewImport(null)}
         images={previewImport?.import_images || []}
         batchName={previewImport?.batch_name || "Import"}
+      />
+
+      <SendApprovalDialog
+        open={!!approvalImport}
+        onOpenChange={(open) => {
+          if (!open) setApprovalImport(null);
+        }}
+        imp={approvalImport}
+        onApprove={(imp, products) => {
+          setApprovalImport(null);
+          handleTriggerWebhook(imp, products);
+        }}
+        isSending={sendingId === approvalImport?.id}
       />
     </>
   );
