@@ -114,9 +114,6 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
                 Original Amount
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
-                Return Fee
-              </TableHead>
-              <TableHead className="font-mono text-xs uppercase tracking-wider">
                 Calculated Refund
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
@@ -125,7 +122,7 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
               <TableHead className="font-mono text-xs uppercase tracking-wider">
                 Status
               </TableHead>
-              <TableHead className="font-mono text-xs uppercase tracking-wider text-right">
+              <TableHead className="font-mono text-xs uppercase tracking-wider">
                 Actions
               </TableHead>
             </TableRow>
@@ -152,9 +149,6 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
                 </TableCell>
                 <TableCell className="font-mono text-xs tabular-nums">
                   €{refund.originalAmount.toFixed(2)}
-                </TableCell>
-                <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
-                  –€3.00
                 </TableCell>
                 <TableCell className="font-mono text-xs tabular-nums">
                   €{refund.calculatedRefund.toFixed(2)}
