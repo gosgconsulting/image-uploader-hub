@@ -19,20 +19,16 @@ export type DateSort = "desc" | "asc" | "none";
 
 interface RefundFiltersProps {
   statusFilter: StatusFilter;
-  confidenceFilter: ConfidenceFilter;
   dateSort: DateSort;
   onStatusChange: (status: StatusFilter) => void;
-  onConfidenceChange: (confidence: ConfidenceFilter) => void;
   onDateSortChange: (sort: DateSort) => void;
   onClearFilters: () => void;
 }
 
 export function RefundFilters({
   statusFilter,
-  confidenceFilter,
   dateSort,
   onStatusChange,
-  onConfidenceChange,
   onDateSortChange,
   onClearFilters,
 }: RefundFiltersProps) {
@@ -41,7 +37,6 @@ export function RefundFilters({
   
   const hasActiveFilters =
     statusFilter.length !== allStatuses.length ||
-    confidenceFilter !== "all" ||
     dateSort !== "none";
 
   const handleStatusToggle = (status: StatusOption) => {
@@ -149,19 +144,6 @@ export function RefundFilters({
           <DropdownMenuRadioItem value="none">None</DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="desc">Most Recent First</DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="asc">Oldest First</DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuLabel>Confidence</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={confidenceFilter}
-          onValueChange={(value) => onConfidenceChange(value as ConfidenceFilter)}
-        >
-          <DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="high">High (≥80%)</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="medium">Medium (50-79%)</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="low">Low (&lt;50%)</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
 
         {hasActiveFilters && (

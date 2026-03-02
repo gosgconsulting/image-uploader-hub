@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { RefundTable } from "@/components/RefundTable";
 import { WebhookSettings } from "@/components/WebhookSettings";
 import { NewImportDialog } from "@/components/NewImportDialog";
-import { RefundFilters, StatusFilter, ConfidenceFilter, DateSort } from "@/components/RefundFilters";
+import { RefundFilters, StatusFilter, DateSort } from "@/components/RefundFilters";
 import { mockRefunds, Refund } from "@/refund.mock";
 
 export default function Refund() {
@@ -14,7 +14,6 @@ export default function Refund() {
     () => localStorage.getItem("webhook_url") || ""
   );
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(["completed", "processing", "pending", "failed"]);
-  const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
   const [dateSort, setDateSort] = useState<DateSort>("desc");
 
   const handleRefundUpdate = useCallback((id: string, updates: Partial<Refund>) => {
@@ -34,17 +33,6 @@ export default function Refund() {
       // This ensures we always show something
     }
 
-    // Apply confidence filter
-    if (confidenceFilter !== "all") {
-      filtered = filtered.filter((r) => {
-        const confidence = r.aiConfidence;
-        if (confidenceFilter === "high") return confidence >= 0.8;
-        if (confidenceFilter === "medium") return confidence >= 0.5 && confidence < 0.8;
-        if (confidenceFilter === "low") return confidence < 0.5;
-        return true;
-      });
-    }
-
     // Apply date sort
     if (dateSort !== "none") {
       filtered.sort((a, b) => {
@@ -62,11 +50,10 @@ export default function Refund() {
     }
 
     return filtered;
-  }, [refunds, statusFilter, confidenceFilter, dateSort]);
+  }, [refunds, statusFilter, dateSort]);
 
   const handleClearFilters = useCallback(() => {
     setStatusFilter(["completed", "processing", "pending", "failed"]);
-    setConfidenceFilter("all");
     setDateSort("desc");
   }, []);
 
@@ -90,10 +77,8 @@ export default function Refund() {
           <div className="flex items-center gap-2">
             <RefundFilters
               statusFilter={statusFilter}
-              confidenceFilter={confidenceFilter}
               dateSort={dateSort}
               onStatusChange={setStatusFilter}
-              onConfidenceChange={setConfidenceFilter}
               onDateSortChange={setDateSort}
               onClearFilters={handleClearFilters}
             />
