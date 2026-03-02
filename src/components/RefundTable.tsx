@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Refund } from "@/refund.mock";
 import { EditRefundDialog } from "@/components/EditRefundDialog";
+import { ViewPdfDialog } from "@/components/ViewPdfDialog";
 import { useToast } from "@/hooks/use-toast";
 
 interface RefundTableProps {
@@ -33,6 +34,7 @@ const statusVariant: Record<
 
 export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
   const [editRefund, setEditRefund] = useState<Refund | null>(null);
+  const [previewRefund, setPreviewRefund] = useState<Refund | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -110,7 +112,12 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
                 <TableCell className="font-mono text-xs tabular-nums">
                   {format(new Date(refund.date), "MMM dd, HH:mm")}
                 </TableCell>
-                <TableCell className="font-mono text-xs">{refund.orderId}</TableCell>
+                <TableCell 
+                  className="font-mono text-xs cursor-pointer hover:text-primary transition-colors"
+                  onClick={() => setPreviewRefund(refund)}
+                >
+                  {refund.orderId}
+                </TableCell>
                 <TableCell className="text-sm">{refund.customer}</TableCell>
                 <TableCell className="font-mono text-xs">
                   {format(new Date(refund.orderDate), "MMM dd, yyyy")}
@@ -136,19 +143,6 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleReject(refund)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Reject</TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
                           onClick={() => handleRefund(refund)}
                           disabled={refund.status === "failed" || processingId === refund.id}
                         >
@@ -156,6 +150,19 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>Refund</TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleReject(refund)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Reject</TooltipContent>
                     </Tooltip>
                   </div>
                 </TableCell>
@@ -175,6 +182,12 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
             setEditRefund(null);
           }
         }}
+      />
+
+      <ViewPdfDialog
+        open={!!previewRefund}
+        onOpenChange={() => setPreviewRefund(null)}
+        pdfUrl={previewRefund?.pdfUrl || ""}
       />
     </>
   );
