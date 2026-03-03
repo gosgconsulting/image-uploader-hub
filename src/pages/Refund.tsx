@@ -1,15 +1,12 @@
 import { useState, useMemo, useCallback } from "react";
-import { DollarSign, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { DollarSign } from "lucide-react";
 import { RefundTable } from "@/components/RefundTable";
 import { WebhookSettings } from "@/components/WebhookSettings";
-import { NewImportDialog } from "@/components/NewImportDialog";
 import { RefundFilters, StatusFilter, DateSort } from "@/components/RefundFilters";
 import { mockRefunds, Refund } from "@/refund.mock";
 
 export default function Refund() {
   const [refunds, setRefunds] = useState<Refund[]>(mockRefunds);
-  const [isNewOpen, setIsNewOpen] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState(
     () => localStorage.getItem("webhook_url") || ""
   );
@@ -86,10 +83,6 @@ export default function Refund() {
               webhookUrl={webhookUrl}
               onWebhookUrlChange={setWebhookUrl}
             />
-            <Button size="sm" onClick={() => setIsNewOpen(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              New Refund
-            </Button>
           </div>
         </div>
 
@@ -99,14 +92,6 @@ export default function Refund() {
           onRefundUpdate={handleRefundUpdate}
         />
       </div>
-
-      <NewImportDialog
-        open={isNewOpen}
-        onOpenChange={setIsNewOpen}
-        onImportCreated={() => {
-          // Optionally refresh or handle import creation
-        }}
-      />
     </div>
   );
 }
