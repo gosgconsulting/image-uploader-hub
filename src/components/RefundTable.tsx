@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { format } from "date-fns";
 import { X, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,15 +11,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Refund } from "@/refund.mock";
 import { EditRefundDialog } from "@/components/EditRefundDialog";
 import { ViewPdfDialog } from "@/components/ViewPdfDialog";
+import { RefundDetailsModal } from "@/components/RefundDetailsModal";
 import { useToast } from "@/hooks/use-toast";
 
 interface RefundTableProps {
   refunds: Refund[];
   onRefundUpdate: (id: string, updates: Partial<Refund>) => void;
+  selectedRefundIds?: Set<string>;
+  onSelectionChange?: (selectedIds: Set<string>) => void;
 }
 
 const statusVariant: Record<
@@ -32,11 +36,84 @@ const statusVariant: Record<
   failed: "destructive",
 };
 
-export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
+export function RefundTable({ 
+  refunds, 
+  onRefundUpdate,
+  selectedRefundIds = new Set(),
+  onSelectionChange,
+}: RefundTableProps) {
   const [editRefund, setEditRefund] = useState<Refund | null>(null);
   const [previewRefund, setPreviewRefund] = useState<Refund | null>(null);
+  const [refundDetailsModalOpen, setRefundDetailsModalOpen] = useState(false);
+  const [selectedRefundForDetails, setSelectedRefundForDetails] = useState<Refund | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // Internal state if parent doesn't manage selection
+  const [internalSelected, setInternalSelected] = useState<Set<string>>(new Set());
+  const selectedIds = onSelectionChange ? selectedRefundIds : internalSelected;
+  const setSelectedIds = onSelectionChange 
+    ? onSelectionChange 
+    : (ids: Set<string>) => setInternalSelected(ids);
+
+  // Calculate selectable refunds (exclude failed status)
+  const selectableRefunds = useMemo(() => {
+    return refunds.filter(r => r.status !== "failed");
+  }, [refunds]);
+  
+  const selectableRefundIds = useMemo(() => {
+    return new Set(selectableRefunds.map(r => r.id));
+  }, [selectableRefunds]);
+
+  // Calculate select-all state (only for selectable refunds)
+  const selectedCount = selectedIds.size;
+  const allSelected = selectableRefunds.length > 0 && selectedCount === selectableRefunds.length;
+  const someSelected = selectedCount > 0 && selectedCount < selectableRefunds.length;
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(selectableRefundIds));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleRowSelect = (refundId: string, checked: boolean) => {
+    const newSelected = new Set(selectedIds);
+    if (checked) {
+      newSelected.add(refundId);
+    } else {
+      newSelected.delete(refundId);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  // Ref for select-all checkbox to handle indeterminate state
+  const selectAllCheckboxRef = useRef<HTMLButtonElement>(null);
+  
+  useEffect(() => {
+    if (selectAllCheckboxRef.current) {
+      selectAllCheckboxRef.current.indeterminate = someSelected;
+    }
+  }, [someSelected]);
+
+  // Remove failed refunds from selection if they're selected
+  useEffect(() => {
+    const failedRefundIds = new Set(
+      refunds.filter(r => r.status === "failed").map(r => r.id)
+    );
+    
+    if (failedRefundIds.size > 0) {
+      const hasFailedSelected = Array.from(selectedIds).some(id => failedRefundIds.has(id));
+      if (hasFailedSelected) {
+        const cleanedSelection = new Set(selectedIds);
+        failedRefundIds.forEach(id => cleanedSelection.delete(id));
+        if (cleanedSelection.size !== selectedIds.size) {
+          setSelectedIds(cleanedSelection);
+        }
+      }
+    }
+  }, [refunds, selectedIds, setSelectedIds]);
 
   const handleReject = (refund: Refund) => {
     onRefundUpdate(refund.id, { status: "failed" });
@@ -81,11 +158,19 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="font-mono text-xs uppercase tracking-wider">
-                Date
+              <TableHead className="w-12">
+                <Checkbox
+                  ref={selectAllCheckboxRef}
+                  checked={allSelected}
+                  onCheckedChange={handleSelectAll}
+                  aria-label="Select all refunds"
+                />
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
                 Order ID#
+              </TableHead>
+              <TableHead className="font-mono text-xs uppercase tracking-wider">
+                Source of Order
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
                 Customer
@@ -107,10 +192,17 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {refunds.map((refund) => (
+            {refunds.map((refund) => {
+              const isFailed = refund.status === "failed";
+              return (
               <TableRow key={refund.id}>
-                <TableCell className="font-mono text-xs tabular-nums">
-                  {format(new Date(refund.date), "MMM dd, HH:mm")}
+                <TableCell>
+                  <Checkbox
+                    checked={selectedIds.has(refund.id)}
+                    onCheckedChange={(checked) => handleRowSelect(refund.id, checked as boolean)}
+                    disabled={isFailed}
+                    aria-label={`Select refund ${refund.orderId}`}
+                  />
                 </TableCell>
                 <TableCell 
                   className="font-mono text-xs cursor-pointer hover:text-primary transition-colors"
@@ -118,13 +210,19 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
                 >
                   {refund.orderId}
                 </TableCell>
+                <TableCell className="text-sm font-mono text-xs">
+                  {refund.source}
+                </TableCell>
                 <TableCell className="text-sm">{refund.customer}</TableCell>
                 <TableCell className="font-mono text-xs">
                   {format(new Date(refund.orderDate), "MMM dd, yyyy")}
                 </TableCell>
                 <TableCell 
                   className="font-mono text-xs tabular-nums cursor-pointer hover:text-primary transition-colors"
-                  onClick={() => setEditRefund(refund)}
+                  onClick={() => {
+                    setSelectedRefundForDetails(refund);
+                    setRefundDetailsModalOpen(true);
+                  }}
                 >
                   €{refund.calculatedRefund.toFixed(2)}
                 </TableCell>
@@ -167,7 +265,8 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
                   </div>
                 </TableCell>
               </TableRow>
-            ))}
+            );
+            })}
           </TableBody>
         </Table>
       </div>
@@ -188,6 +287,25 @@ export function RefundTable({ refunds, onRefundUpdate }: RefundTableProps) {
         open={!!previewRefund}
         onOpenChange={() => setPreviewRefund(null)}
         pdfUrl={previewRefund?.pdfUrl || ""}
+      />
+
+      <RefundDetailsModal
+        open={refundDetailsModalOpen}
+        onOpenChange={setRefundDetailsModalOpen}
+        refund={selectedRefundForDetails}
+        onSave={(data) => {
+          if (selectedRefundForDetails) {
+            // Update refund with new calculated refund amount
+            onRefundUpdate(selectedRefundForDetails.id, {
+              calculatedRefund: data.refundAmount,
+              returnFee: -data.returnFees,
+            });
+            toast({
+              title: "Refund details updated",
+              description: `Refund ${selectedRefundForDetails.orderId} has been updated.`,
+            });
+          }
+        }}
       />
     </>
   );

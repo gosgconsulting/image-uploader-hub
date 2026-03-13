@@ -1,7 +1,7 @@
 export interface Refund {
   id: string;
   date: string;
-  source: "Google Drive" | "Direct";
+  source: "FRNCH - Service : SHOP2SHOP" | "FRNCH - Service : MONDIAL_RELAY" | "Zalando Partner" | "FRNCH - Service : COLISSIMO";
   orderId: string;
   customer: string;
   skus: string[];
@@ -19,7 +19,7 @@ export const mockRefunds: Refund[] = [
   {
     id: "1",
     date: "2026-02-17T12:49:00",
-    source: "Google Drive",
+    source: "FRNCH - Service : COLISSIMO",
     orderId: "#10452",
     customer: "John Smith",
     skus: ["SKU-001", "SKU-002", "SKU-003"],
@@ -35,7 +35,7 @@ export const mockRefunds: Refund[] = [
   {
     id: "2",
     date: "2026-02-17T12:41:00",
-    source: "Direct",
+    source: "Zalando Partner",
     orderId: "#10451",
     customer: "Jane Doe",
     skus: ["SKU-004"],
@@ -51,7 +51,7 @@ export const mockRefunds: Refund[] = [
   {
     id: "3",
     date: "2026-02-17T12:33:00",
-    source: "Google Drive",
+    source: "FRNCH - Service : SHOP2SHOP",
     orderId: "#10450",
     customer: "Bob Johnson",
     skus: ["SKU-005", "SKU-006"],
@@ -67,7 +67,7 @@ export const mockRefunds: Refund[] = [
   {
     id: "4",
     date: "2026-02-16T21:08:00",
-    source: "Direct",
+    source: "FRNCH - Service : MONDIAL_RELAY",
     orderId: "#10449",
     customer: "Alice Williams",
     skus: ["SKU-007", "SKU-008", "SKU-009"],
@@ -83,7 +83,7 @@ export const mockRefunds: Refund[] = [
   {
     id: "5",
     date: "2026-02-16T20:56:00",
-    source: "Google Drive",
+    source: "FRNCH - Service : COLISSIMO",
     orderId: "#10448",
     customer: "Charlie Brown",
     skus: ["SKU-010"],
@@ -99,7 +99,7 @@ export const mockRefunds: Refund[] = [
   {
     id: "6",
     date: "2026-02-16T18:10:00",
-    source: "Direct",
+    source: "FRNCH - Service : SHOP2SHOP",
     orderId: "#10447",
     customer: "Diana Prince",
     skus: ["SKU-011", "SKU-012"],
@@ -115,7 +115,7 @@ export const mockRefunds: Refund[] = [
   {
     id: "7",
     date: "2026-02-16T12:58:00",
-    source: "Google Drive",
+    source: "Zalando Partner",
     orderId: "#10446",
     customer: "Edward Norton",
     skus: ["SKU-013"],
@@ -131,7 +131,7 @@ export const mockRefunds: Refund[] = [
   {
     id: "8",
     date: "2026-02-13T18:17:00",
-    source: "Direct",
+    source: "FRNCH - Service : MONDIAL_RELAY",
     orderId: "#10445",
     customer: "Fiona Apple",
     skus: ["SKU-014", "SKU-015", "SKU-016"],
