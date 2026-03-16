@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { DollarSign } from "lucide-react";
 import { RefundTable } from "@/components/RefundTable";
 import { WebhookSettings } from "@/components/WebhookSettings";
@@ -7,9 +7,17 @@ import { BulkRefundDialog } from "@/components/BulkRefundDialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { mockRefunds, Refund } from "@/refund.mock";
+import { calculateRefundAmount } from "@/utils/refundCalculation";
 
 export default function Refund() {
-  const [refunds, setRefunds] = useState<Refund[]>(mockRefunds);
+  // Initialize refunds with calculated refund amounts
+  const [refunds, setRefunds] = useState<Refund[]>(() => {
+    // Calculate refund amounts for all refunds on initialization
+    return mockRefunds.map(refund => ({
+      ...refund,
+      calculatedRefund: calculateRefundAmount(refund.id, refund.returnFee),
+    }));
+  });
   const [webhookUrl, setWebhookUrl] = useState(
     () => localStorage.getItem("webhook_url") || ""
   );

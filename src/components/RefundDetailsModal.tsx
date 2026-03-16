@@ -16,12 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Refund } from "@/refund.mock";
-
-interface Product {
-  id: string;
-  name: string;
-  amount: number;
-}
+import { getRefundCalculationData, Product } from "@/utils/refundCalculation";
 
 interface RefundDetailsModalProps {
   open: boolean;
@@ -34,77 +29,6 @@ interface RefundDetailsModalProps {
   }) => void;
 }
 
-// Sample product pool
-const PRODUCT_POOL = [
-  "Manteau DELPHINA Bleu electrique - XS / BLEU ELECTRIQUE",
-  "Gilet MANILA Rose pale - S / ROSE PALE",
-  "Manteau DELPHINA Bleu electrique - S / BLEU ELECTRIQUE",
-  "Pull CAMELIA Gris - S / GRIS",
-  "Robe OEILLET Noir - XS / NOIR",
-  "Veste PREVERT Noir - S / NOIR",
-  "Veste PREVERT Kaki - XS / KAKI",
-  "Veste PREVERT Kaki - S / KAKI",
-  "Manteau MATHELINE Vert foret",
-  "Jupe NASSIA Chocolat - L / CHOCOLAT",
-  "Pull DIAMOND Rouge - S / ROUGE",
-  "Pull DIAMOND Gris - S / GRIS",
-  "Robe DIANELLA Fuchsia - M / FUCHSIA",
-  "Top DONNA Noir - M / NOIR",
-  "Blouse MISTIGRI Geo flowers - XS / GEO FLOWERS",
-  "Jean GAYNOR Bleu jean - 25 / BLEU-JEAN",
-  "Cardigan MORAND Rouge - S / ROUGE",
-  "Chemise RAVEN Noir - M / NOIR",
-  "Pull MYOSOTIS Bleu jean - M / BLEU JEAN",
-  "Blouse BOLDO Marron glace - S / MARRON GLACE",
-  "Jean SUKI Bleu nuit - 26 / BLEU NUIT",
-  "Robe SIL Rouge - XS / ROUGE",
-  "Veste PREVERT Noir - XL / NOIR",
-  "Combi-pantalon ALYA Lilas - S / LILAS",
-  "Veste PREVERT Marron glace - M / MARRON GLACE",
-  "Jean PRUNELLA Bleu marine - 27 / BLEU MARINE",
-  "Pantalon AUSTEN Lilas - S / LILAS",
-  "Blouse CHOUPETTE Rouge - M / ROUGE",
-  "Trench HALIMI Bordeaux - XS / BORDEAUX",
-  "Manteau NEMORALIS Beige",
-  "Veste PREVEST Marron glace",
-  "Pantalon HORTENSIS Beige",
-  "Pull TRIOLET Marron glace",
-];
-
-// Seeded random number generator for consistent products
-function seededRandom(seed: number) {
-  let value = seed;
-  return () => {
-    value = (value * 9301 + 49297) % 233280;
-    return value / 233280;
-  };
-}
-
-// Generate consistent products based on refund ID (so same refund always gets same products)
-function generateRandomProducts(count: number = 5, refundId: string): Product[] {
-  // Use refund ID as seed for consistent generation
-  const seed = refundId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const random = seededRandom(seed);
-  
-  // Shuffle products consistently based on seed
-  const shuffled = [...PRODUCT_POOL].sort((a, b) => {
-    const hashA = a.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const hashB = b.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return (hashA + seed) % 1000 - (hashB + seed) % 1000;
-  });
-  
-  return shuffled.slice(0, count).map((name, index) => {
-    // Generate consistent amount based on seed and index
-    const amountSeed = seed + index * 1000;
-    const amountRandom = seededRandom(amountSeed);
-    const amount = Math.round((amountRandom() * 150 + 50) * 100) / 100; // Random between 50-200
-    return {
-      id: `product-${index + 1}`,
-      name,
-      amount,
-    };
-  });
-}
 
 export function RefundDetailsModal({
   open,
@@ -124,38 +48,15 @@ export function RefundDetailsModal({
   // Initialize products when modal opens
   useEffect(() => {
     if (open && refund) {
-      // Generate consistent products based on refund ID
-      const generatedProducts = generateRandomProducts(5, refund.id);
+      // Use shared calculation logic to get products and ensure consistency
+      const { products: generatedProducts } = getRefundCalculationData(refund.id, refund.returnFee);
       setProducts(generatedProducts);
       setReturnFees(Math.abs(refund.returnFee));
       
-      // Use the refund amount from the table as the source of truth
-      const targetRefundAmount = refund.calculatedRefund;
-      
-      // Calculate what the total should be: refundAmount - returnFees
-      const targetTotal = targetRefundAmount - Math.abs(refund.returnFee);
-      
-      // Calculate current total from generated products
-      const currentTotal = generatedProducts.reduce((sum, p) => sum + p.amount, 0);
-      
-      // Adjust the last product to make the total match the target
-      // This ensures the refund amount matches what's in the table
-      if (generatedProducts.length > 0 && Math.abs(currentTotal - targetTotal) > 0.01) {
-        const adjustment = targetTotal - currentTotal;
-        const adjustedProducts = [...generatedProducts];
-        const lastProduct = adjustedProducts[adjustedProducts.length - 1];
-        adjustedProducts[adjustedProducts.length - 1] = {
-          ...lastProduct,
-          amount: Math.max(0.01, lastProduct.amount + adjustment), // Ensure at least 0.01
-        };
-        setProducts(adjustedProducts);
-      } else {
-        setProducts(generatedProducts);
-      }
-      
-      // Use the refund amount from the table (this is the source of truth)
-      setRefundAmount(targetRefundAmount);
-      // Start with auto-calculation enabled
+      // Use the refund amount from the parent (pre-calculated, source of truth)
+      // This value is already correct and calculated using the same logic
+      setRefundAmount(refund.calculatedRefund);
+      // Start with auto-calculation disabled since we're using the pre-calculated value
       setIsManualRefundAmount(false);
       setIsInitialized(true);
       setPdfPage(2);
@@ -172,50 +73,12 @@ export function RefundDetailsModal({
     return products.reduce((sum, product) => sum + product.amount, 0);
   }, [products]);
 
-  // Auto-calculate refund amount if not manually edited (only after initialization)
-  useEffect(() => {
-    if (!isManualRefundAmount && products.length > 0 && isInitialized) {
-      const calculated = total + returnFees;
-      setRefundAmount(calculated);
-    }
-  }, [total, returnFees, isManualRefundAmount, products.length, isInitialized]);
+  // Note: We no longer auto-calculate refund amount from products
+  // The refund amount comes from the parent (pre-calculated) and can be manually edited
+  // Products are static/read-only, so we don't need to recalculate
 
-  const handleProductAmountChange = (productId: string, value: string) => {
-    // Remove leading zeros
-    let cleanedValue = value.replace(/^0+(?=\d)/, '');
-    
-    if (cleanedValue === "" || cleanedValue === "." || cleanedValue === "-") {
-      setProducts((prev) =>
-        prev.map((p) => (p.id === productId ? { ...p, amount: 0 } : p))
-      );
-      return;
-    }
-    const numValue = parseFloat(cleanedValue) || 0;
-    setProducts((prev) =>
-      prev.map((p) => (p.id === productId ? { ...p, amount: numValue } : p))
-    );
-  };
-
-  const handleReturnFeesChange = (value: string) => {
-    // Remove all leading zeros except for "0" or "0."
-    let cleanedValue = value;
-    if (cleanedValue.length > 1) {
-      // Remove leading zeros but keep single "0" or "0."
-      cleanedValue = cleanedValue.replace(/^0+(?=\d)/, '');
-    }
-    
-    // Allow typing - accept any valid number input
-    if (cleanedValue === "" || cleanedValue === "." || cleanedValue === "-") {
-      setReturnFees(0);
-      return;
-    }
-    const numValue = parseFloat(cleanedValue);
-    if (!isNaN(numValue) && numValue >= 0) {
-      setReturnFees(numValue);
-    } else if (cleanedValue === "") {
-      setReturnFees(0);
-    }
-  };
+  // Product amounts and return fees are now read-only (static)
+  // Only refund amount can be edited
 
   const handleRefundAmountChange = (value: string) => {
     // Remove leading zeros
