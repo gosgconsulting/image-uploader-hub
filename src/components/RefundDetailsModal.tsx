@@ -307,19 +307,11 @@ export function RefundDetailsModal({
                             <TableCell className="text-right py-3">
                               <div className="flex items-center justify-end gap-2">
                                 <span className="text-sm font-medium">€</span>
-                                <Input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={product.amount.toFixed(2)}
-                                  onChange={(e) =>
-                                    handleProductAmountChange(
-                                      product.id,
-                                      e.target.value
-                                    )
-                                  }
-                                  className="w-28 h-9 font-mono text-sm text-right border bg-background focus-visible:ring-2 focus-visible:ring-ring"
-                                />
+                                <div className="w-28 h-9 flex items-center justify-end font-mono text-sm text-right border bg-background rounded-md px-3">
+                                  <span className="tabular-nums font-medium">
+                                    {product.amount.toFixed(2)}
+                                  </span>
+                                </div>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -351,25 +343,11 @@ export function RefundDetailsModal({
                     </Label>
                     <div className="flex items-center gap-2 w-36">
                       <span className="text-sm font-medium">€</span>
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        value={returnFees === 0 ? "" : returnFees.toString().replace(/^0+(?=\d)/, '')}
-                        onChange={(e) => {
-                          let value = e.target.value;
-                          // Remove leading zeros immediately
-                          if (value.length > 1) {
-                            value = value.replace(/^0+(?=\d)/, '');
-                          }
-                          handleReturnFeesChange(value);
-                        }}
-                        onBlur={(e) => {
-                          const numValue = parseFloat(e.target.value) || 0;
-                          setReturnFees(numValue);
-                        }}
-                        placeholder="0.00"
-                        className="w-28 h-9 font-mono text-sm text-right border bg-background focus-visible:ring-1 focus-visible:ring-ring"
-                      />
+                      <div className="w-28 h-9 flex items-center justify-end font-mono text-sm text-right border bg-background rounded-md px-3">
+                        <span className="tabular-nums font-medium">
+                          {returnFees.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
                   </div>
 

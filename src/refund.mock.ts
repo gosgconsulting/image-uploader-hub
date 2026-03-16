@@ -10,9 +10,18 @@ export interface Refund {
   originalAmount: number;
   returnFee: number; // Always -3
   calculatedRefund: number;
+  reasonOfReturn: string;
   aiConfidence: number; // 0-1
   status: "completed" | "processing" | "pending" | "failed";
   pdfUrl?: string;
+}
+
+const REASON_OF_RETURN_OPTIONS = ["Trop grand", "Ne me plaît pas"];
+
+// Helper function to get a consistent random reason based on refund ID
+function getRandomReason(id: string): string {
+  const hash = id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return REASON_OF_RETURN_OPTIONS[hash % REASON_OF_RETURN_OPTIONS.length];
 }
 
 export const mockRefunds: Refund[] = [
@@ -28,6 +37,7 @@ export const mockRefunds: Refund[] = [
     originalAmount: 123.45,
     returnFee: -3,
     calculatedRefund: 120.45,
+    reasonOfReturn: getRandomReason("1"),
     aiConfidence: 0.92,
     status: "completed",
     pdfUrl: "https://mozilla.github.io/pdf.js/web/compressed.tracemonkey-pldi-09.pdf",
@@ -44,6 +54,7 @@ export const mockRefunds: Refund[] = [
     originalAmount: 89.99,
     returnFee: -3,
     calculatedRefund: 86.99,
+    reasonOfReturn: getRandomReason("2"),
     aiConfidence: 0.75,
     status: "processing",
     pdfUrl: "https://www.africau.edu/images/default/sample.pdf",
@@ -60,6 +71,7 @@ export const mockRefunds: Refund[] = [
     originalAmount: 200.00,
     returnFee: -3,
     calculatedRefund: 197.00,
+    reasonOfReturn: getRandomReason("3"),
     aiConfidence: 0.45,
     status: "pending",
     pdfUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
@@ -76,6 +88,7 @@ export const mockRefunds: Refund[] = [
     originalAmount: 150.50,
     returnFee: -3,
     calculatedRefund: 147.50,
+    reasonOfReturn: getRandomReason("4"),
     aiConfidence: 0.88,
     status: "failed",
     pdfUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
@@ -92,6 +105,7 @@ export const mockRefunds: Refund[] = [
     originalAmount: 75.25,
     returnFee: -3,
     calculatedRefund: 72.25,
+    reasonOfReturn: getRandomReason("5"),
     aiConfidence: 0.65,
     status: "completed",
     pdfUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
@@ -108,6 +122,7 @@ export const mockRefunds: Refund[] = [
     originalAmount: 300.00,
     returnFee: -3,
     calculatedRefund: 297.00,
+    reasonOfReturn: getRandomReason("6"),
     aiConfidence: 0.35,
     status: "pending",
     pdfUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
@@ -124,6 +139,7 @@ export const mockRefunds: Refund[] = [
     originalAmount: 45.99,
     returnFee: -3,
     calculatedRefund: 42.99,
+    reasonOfReturn: getRandomReason("7"),
     aiConfidence: 0.95,
     status: "processing",
     pdfUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
@@ -140,6 +156,7 @@ export const mockRefunds: Refund[] = [
     originalAmount: 175.75,
     returnFee: -3,
     calculatedRefund: 172.75,
+    reasonOfReturn: getRandomReason("8"),
     aiConfidence: 0.82,
     status: "completed",
     pdfUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",

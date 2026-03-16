@@ -182,6 +182,9 @@ export function RefundTable({
                 Refund Amount
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
+                Reason of Return
+              </TableHead>
+              <TableHead className="font-mono text-xs uppercase tracking-wider">
                 Status
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
@@ -225,6 +228,9 @@ export function RefundTable({
                   }}
                 >
                   €{refund.calculatedRefund.toFixed(2)}
+                </TableCell>
+                <TableCell className="text-sm">
+                  {refund.reasonOfReturn}
                 </TableCell>
                 <TableCell>
                   <Badge
