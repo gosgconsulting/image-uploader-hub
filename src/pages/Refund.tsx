@@ -6,7 +6,8 @@ import { RefundFilters, StatusFilter, DateSort } from "@/components/RefundFilter
 import { BulkRefundDialog } from "@/components/BulkRefundDialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { mockRefunds, Refund } from "@/refund.mock";
+import { mockRefunds } from "@/refund.mock";
+import type { Refund } from "@/refund.mock";
 import { calculateRefundAmount } from "@/utils/refundCalculation";
 
 export default function Refund() {

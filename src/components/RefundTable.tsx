@@ -88,14 +88,7 @@ export function RefundTable({
     setSelectedIds(newSelected);
   };
 
-  // Ref for select-all checkbox to handle indeterminate state
-  const selectAllCheckboxRef = useRef<HTMLButtonElement>(null);
-  
-  useEffect(() => {
-    if (selectAllCheckboxRef.current) {
-      selectAllCheckboxRef.current.indeterminate = someSelected;
-    }
-  }, [someSelected]);
+  // Removed manual ref for select-all Checkbox; Radix supports 'indeterminate' via the 'checked' prop.
 
   // Remove failed refunds from selection if they're selected
   useEffect(() => {
@@ -160,10 +153,16 @@ export function RefundTable({
             <TableRow>
               <TableHead className="w-12">
                 <Checkbox
-                  ref={selectAllCheckboxRef}
-                  checked={allSelected}
-                  onCheckedChange={handleSelectAll}
-                  aria-label="Select all refunds"
+                  checked={allSelected ? true : someSelected ? 'indeterminate' : false}
+                  onCheckedChange={(checked) => {
+                    const isChecked = checked === true;
+                    const newSelected = new Set<string>();
+                    if (isChecked) {
+                      currentPageData.forEach((r) => newSelected.add(r.id));
+                    }
+                    setSelectedIds(newSelected);
+                  }}
+                  aria-label="Select all"
                 />
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
