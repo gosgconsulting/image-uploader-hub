@@ -158,7 +158,8 @@ export function RefundTable({
                     const isChecked = checked === true;
                     const newSelected = new Set<string>();
                     if (isChecked) {
-                      currentPageData.forEach((r) => newSelected.add(r.id));
+                      // Use the provided refunds list for selecting all
+                      refunds.forEach((r) => newSelected.add(r.id));
                     }
                     setSelectedIds(newSelected);
                   }}
