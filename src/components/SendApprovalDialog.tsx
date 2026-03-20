@@ -39,11 +39,14 @@ export interface WebhookProduct {
   file_url: string;
   productid: string;
   productname: string;
+  /** From mapdata response; n8n may send as referenceparent or referenceParent */
+  referenceparent?: string;
+  referenceParent?: string;
 }
 
 interface MappedProduct {
   shopify_product_name: string;
-  sku: string;
+  referenceParent: string;
   productid: string;
   images: { file_name: string; file_url: string }[];
 }
@@ -150,7 +153,7 @@ export function SendApprovalDialog({
                       Shopify Product Name
                     </TableHead>
                     <TableHead className="font-mono text-xs uppercase tracking-wider">
-                      SKU
+                      Reference Parent
                     </TableHead>
                     <TableHead className="font-mono text-xs uppercase tracking-wider">
                       Feature Image
@@ -162,8 +165,6 @@ export function SendApprovalDialog({
                 </TableHeader>
                 <TableBody>
                   {mappedProducts.map((product, index) => {
-                    console.log('product',product);
-                    
                     const featureImage = product.images[0] || null;
                     const galleryImages = product.images.slice(1);
 
@@ -175,7 +176,7 @@ export function SendApprovalDialog({
                           </span>
                         </TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
-                          {product.sku}
+                          {product.referenceParent || "—"}
                         </TableCell>
                         <TableCell>
                           {featureImage ? (
@@ -287,7 +288,7 @@ function parseWebhookResponse(data: unknown): {
 
     const grouped = Array.from(groupedMap.values()).map((group) => ({
       shopify_product_name: group[0].productname,
-      sku: group[0].file_name,
+      referenceParent: group[0].referenceparent ?? group[0].referenceParent ?? "",
       productid: group[0].productid,
       images: group.map((p) => ({
         file_name: p.file_name,
@@ -305,7 +306,7 @@ function buildFallbackProducts(imp: Import): MappedProduct[] {
   return [
     {
       shopify_product_name: imp.batch_name || "Untitled Product",
-      sku: `SKU-${imp.id.slice(0, 6).toUpperCase()}`,
+      referenceParent: "",
       productid: "",
       images: imp.import_images.map((img) => ({
         file_name: img.file_name,
