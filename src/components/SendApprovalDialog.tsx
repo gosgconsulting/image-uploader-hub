@@ -549,10 +549,13 @@ export function SendApprovalDialog({
           productname: p.shopify_product_name,
           referenceparent: p.referenceParent,
           ...rawProducts.find(
-            (rp) => rp.productid === p.productid && rp.file_name === img.file_name
+            (rp) => rp.productid === p.productid && rp.file_url === img.file_url
           ),
         } as WebhookProduct))
       );
+
+      console.log('payload',payload);
+      
     onApprove(imp, payload);
   };
 
