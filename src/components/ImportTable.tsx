@@ -214,8 +214,7 @@ export function ImportTable({
                     >
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
-                    {imp.status !== "completed" && (
-                      <Button
+                     <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => setApprovalImport(imp)}
@@ -229,7 +228,6 @@ export function ImportTable({
                           <Send className="h-3.5 w-3.5" />
                         )}
                       </Button>
-                    )}
                   </div>
                 </TableCell>
               </TableRow>
