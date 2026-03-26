@@ -58,13 +58,14 @@ interface SendApprovalDialogProps {
   imp: Import | null;
   onApprove: (imp: Import, products: WebhookProduct[]) => void;
   isSending: boolean;
+  onDataChange?: () => void;
 }
 
 // ─── Upload helper ─────────────────────────────────────────────────────────────
 
 async function uploadImageToSupabase(
   importId: string,
-  file: File
+  file: File,
 ): Promise<{ file_name: string; file_url: string }> {
   const safeName = `${Date.now()}_${file.name}`;
   const filePath = `${importId}/${safeName}`;
@@ -99,7 +100,12 @@ interface UploadZoneProps {
   label?: string;
 }
 
-function UploadZone({ importId, onUploaded, multiple = true, label }: UploadZoneProps) {
+function UploadZone({
+  importId,
+  onUploaded,
+  multiple = true,
+  label,
+}: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -112,7 +118,7 @@ function UploadZone({ importId, onUploaded, multiple = true, label }: UploadZone
       setUploading(true);
       try {
         const results = await Promise.all(
-          images.map((f) => uploadImageToSupabase(importId, f))
+          images.map((f) => uploadImageToSupabase(importId, f)),
         );
         onUploaded(results);
       } catch (err: any) {
@@ -125,7 +131,7 @@ function UploadZone({ importId, onUploaded, multiple = true, label }: UploadZone
         setUploading(false);
       }
     },
-    [importId, onUploaded, toast]
+    [importId, onUploaded, toast],
   );
 
   const onDragOver = (e: React.DragEvent) => {
@@ -160,7 +166,9 @@ function UploadZone({ importId, onUploaded, multiple = true, label }: UploadZone
       ) : (
         <>
           <Upload className="h-4 w-4 shrink-0" />
-          <span className="font-mono text-xs">{label ?? "Drop or click to upload"}</span>
+          <span className="font-mono text-xs">
+            {label ?? "Drop or click to upload"}
+          </span>
         </>
       )}
       <input
@@ -185,7 +193,9 @@ interface ImagePickerDialogProps {
   title: string;
   importId: string;
   onSelect: (index: number) => void;
-  onNewImagesUploaded: (imgs: { file_name: string; file_url: string }[]) => void;
+  onNewImagesUploaded: (
+    imgs: { file_name: string; file_url: string }[],
+  ) => void;
 }
 
 function ImagePickerDialog({
@@ -227,20 +237,31 @@ function ImagePickerDialog({
                 />
                 {i === selectedIndex && (
                   <div className="absolute top-1.5 right-1.5 bg-primary rounded-full h-5 w-5 flex items-center justify-center">
-                    <svg className="h-3 w-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    <svg
+                      className="h-3 w-3 text-primary-foreground"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={3}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                   </div>
                 )}
                 <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5">
-                  <p className="text-[9px] text-white truncate">{img.file_name}</p>
+                  <p className="text-[9px] text-white truncate">
+                    {img.file_name}
+                  </p>
                 </div>
               </button>
             ))}
           </div>
 
           {/* Upload zone */}
-       
         </div>
 
         <DialogFooter>
@@ -263,7 +284,9 @@ interface GalleryEditorDialogProps {
   importId: string;
   onSetFeature: (index: number) => void;
   onRemoveGallery: (index: number) => void;
-  onNewImagesUploaded: (imgs: { file_name: string; file_url: string }[]) => void;
+  onNewImagesUploaded: (
+    imgs: { file_name: string; file_url: string }[],
+  ) => void;
 }
 
 function GalleryEditorDialog({
@@ -280,7 +303,9 @@ function GalleryEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle className="font-mono text-sm">Edit Gallery Images</DialogTitle>
+          <DialogTitle className="font-mono text-sm">
+            Edit Gallery Images
+          </DialogTitle>
         </DialogHeader>
         <div className="overflow-auto flex-1 space-y-3">
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 p-1">
@@ -313,24 +338,28 @@ function GalleryEditorDialog({
                     <X className="h-3 w-3" />
                   </button>
 
-                  {!isFeature && (
+                  {/* {!isFeature && (
                     <button
                       onClick={() => onSetFeature(i)}
                       className="absolute bottom-0 inset-x-0 bg-primary/80 text-primary-foreground text-[9px] font-semibold py-1 opacity-0 group-hover:opacity-100 transition-opacity text-center"
                     >
                       Set as Feature
                     </button>
-                  )}
+                  )} */}
 
                   {isFeature && (
                     <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5">
-                      <p className="text-[9px] text-white truncate">{img.file_name}</p>
+                      <p className="text-[9px] text-white truncate">
+                        {img.file_name}
+                      </p>
                     </div>
                   )}
 
                   {!isFeature && (
                     <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5 group-hover:opacity-0 transition-opacity">
-                      <p className="text-[9px] text-white truncate">{img.file_name}</p>
+                      <p className="text-[9px] text-white truncate">
+                        {img.file_name}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -360,6 +389,7 @@ export function SendApprovalDialog({
   imp,
   onApprove,
   isSending,
+  onDataChange,
 }: SendApprovalDialogProps) {
   const [loading, setLoading] = useState(false);
   const [rawProducts, setRawProducts] = useState<WebhookProduct[]>([]);
@@ -402,8 +432,10 @@ export function SendApprovalDialog({
       const { filtered, grouped } = parseWebhookResponse(data);
 
       setRawProducts(filtered);
+      onDataChange?.();
 
-      const freshProducts = grouped.length > 0 ? grouped : buildFallbackProducts(imp);
+      const freshProducts =
+        grouped.length > 0 ? grouped : buildFallbackProducts(imp);
 
       setEditableProducts((prev) => {
         // First load — use webhook response as-is
@@ -413,20 +445,27 @@ export function SendApprovalDialog({
         }
 
         // Subsequent loads — merge to avoid creating new rows for already-assigned images
-        const assignedUrls = new Set(prev.flatMap((p) => p.images.map((i) => i.file_url)));
+        const assignedUrls = new Set(
+          prev.flatMap((p) => p.images.map((i) => i.file_url)),
+        );
 
         // Keep existing products with their current image list (preserves local edits & uploads)
         const existingIds = new Set(prev.map((p) => p.productid));
         const merged = prev.map((p) => {
-          const fresh = freshProducts.find((fp) => fp.productid === p.productid);
+          const fresh = freshProducts.find(
+            (fp) => fp.productid === p.productid,
+          );
           return fresh ? { ...fresh, images: p.images } : p;
         });
 
         // Only append genuinely new products whose images aren't already assigned
         for (const fp of freshProducts) {
           if (!existingIds.has(fp.productid)) {
-            const unassigned = fp.images.filter((i) => !assignedUrls.has(i.file_url));
-            if (unassigned.length > 0) merged.push({ ...fp, images: unassigned });
+            const unassigned = fp.images.filter(
+              (i) => !assignedUrls.has(i.file_url),
+            );
+            if (unassigned.length > 0)
+              merged.push({ ...fp, images: unassigned });
           }
         }
 
@@ -463,7 +502,8 @@ export function SendApprovalDialog({
 
   // ── Selection ──────────────────────────────────────────────────────────────
   const allSelected =
-    editableProducts.length > 0 && selectedRows.size === editableProducts.length;
+    editableProducts.length > 0 &&
+    selectedRows.size === editableProducts.length;
   const someSelected = selectedRows.size > 0 && !allSelected;
 
   const toggleSelectAll = () => {
@@ -491,7 +531,10 @@ export function SendApprovalDialog({
     });
   };
 
-  const removeGalleryImage = async (productIndex: number, imageIndex: number) => {
+  const removeGalleryImage = async (
+    productIndex: number,
+    imageIndex: number,
+  ) => {
     const img = editableProducts[productIndex].images[imageIndex];
 
     // Always remove from UI immediately
@@ -509,22 +552,25 @@ export function SendApprovalDialog({
       if (storagePath) {
         await supabase.storage.from("import-images").remove([storagePath]);
       }
-      await supabase.from("import_images").delete().eq("file_url", img.file_url);
+      await supabase
+        .from("import_images")
+        .delete()
+        .eq("file_url", img.file_url);
+      fetchMapData();
     } catch (err: any) {
       toast({
         title: "Image removed from view",
-        description: "Could not delete from storage: " + (err?.message || "unknown error"),
+        description:
+          "Could not delete from storage: " + (err?.message || "unknown error"),
         variant: "destructive",
       });
     }
-
-    onOpenChange(false);
   };
 
   /** Append newly uploaded images to a product's image list. */
   const appendImagesToProduct = (
     productIndex: number,
-    newImgs: { file_name: string; file_url: string }[]
+    newImgs: { file_name: string; file_url: string }[],
   ) => {
     setEditableProducts((prev) => {
       const updated = [...prev];
@@ -541,21 +587,25 @@ export function SendApprovalDialog({
     const payload: WebhookProduct[] = editableProducts
       .filter((_, i) => selectedRows.has(i))
       .flatMap((p) =>
-        p.images.map((img) => ({
-          id: "",
-          file_name: img.file_name,
-          file_url: img.file_url,
-          productid: p.productid,
-          productname: p.shopify_product_name,
-          referenceparent: p.referenceParent,
-          ...rawProducts.find(
-            (rp) => rp.productid === p.productid && rp.file_url === img.file_url
-          ),
-        } as WebhookProduct))
+        p.images.map(
+          (img) =>
+            ({
+              id: "",
+              file_name: img.file_name,
+              file_url: img.file_url,
+              productid: p.productid,
+              productname: p.shopify_product_name,
+              referenceparent: p.referenceParent,
+              ...rawProducts.find(
+                (rp) =>
+                  rp.productid === p.productid && rp.file_url === img.file_url,
+              ),
+            }) as WebhookProduct,
+        ),
       );
 
-      console.log('payload',payload);
-      
+    console.log("payload", payload);
+
     onApprove(imp, payload);
   };
 
@@ -575,10 +625,10 @@ export function SendApprovalDialog({
           <UploadZone
             importId={imp.id}
             label="Drop or click to upload new gallery images"
-            onUploaded={(newImgs) => {
-              const indices = selectedRows.size > 0 ? Array.from(selectedRows) : editableProducts.map((_, i) => i);
-              indices.forEach((i) => appendImagesToProduct(i, newImgs));
-              onOpenChange(false);
+            onUploaded={() => {
+              setEditableProducts([]);
+              setSelectedRows(new Set());
+              fetchMapData();
             }}
           />
 
@@ -595,7 +645,13 @@ export function SendApprovalDialog({
                     <TableRow>
                       <TableHead className="w-10 px-3">
                         <Checkbox
-                          checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                          checked={
+                            allSelected
+                              ? true
+                              : someSelected
+                                ? "indeterminate"
+                                : false
+                          }
                           onCheckedChange={toggleSelectAll}
                           aria-label="Select all rows"
                         />
@@ -621,7 +677,10 @@ export function SendApprovalDialog({
                       const isSelected = selectedRows.has(index);
 
                       return (
-                        <TableRow key={index} className={!isSelected ? "opacity-50" : undefined}>
+                        <TableRow
+                          key={index}
+                          className={!isSelected ? "opacity-50" : undefined}
+                        >
                           <TableCell className="px-3">
                             <Checkbox
                               checked={isSelected}
@@ -631,7 +690,9 @@ export function SendApprovalDialog({
                           </TableCell>
 
                           <TableCell className="text-sm font-medium max-w-[200px]">
-                            <span className="line-clamp-2">{product.shopify_product_name}</span>
+                            <span className="line-clamp-2">
+                              {product.shopify_product_name}
+                            </span>
                           </TableCell>
 
                           <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
@@ -724,7 +785,11 @@ export function SendApprovalDialog({
             <div className="flex items-center text-xs text-muted-foreground mr-auto font-mono">
               {selectedRows.size} / {editableProducts.length} selected
             </div>
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSending}>
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSending}
+            >
               Cancel
             </Button>
             <Button
@@ -759,11 +824,11 @@ export function SendApprovalDialog({
           }}
           onNewImagesUploaded={(newImgs) => {
             // Append then auto-select the first new image as feature
-            const currentLen = editableProducts[featurePickerFor]?.images.length ?? 0;
+            const currentLen =
+              editableProducts[featurePickerFor]?.images.length ?? 0;
             appendImagesToProduct(featurePickerFor, newImgs);
             setFeatureImage(featurePickerFor, currentLen); // index after append
             setFeaturePickerFor(null);
-            onOpenChange(false);
           }}
         />
       )}
@@ -776,11 +841,14 @@ export function SendApprovalDialog({
           allImages={galleryProduct.images}
           featureIndex={0}
           importId={imp.id}
-          onSetFeature={(imageIndex) => setFeatureImage(galleryEditorFor, imageIndex)}
-          onRemoveGallery={(imageIndex) => removeGalleryImage(galleryEditorFor, imageIndex)}
+          onSetFeature={(imageIndex) =>
+            setFeatureImage(galleryEditorFor, imageIndex)
+          }
+          onRemoveGallery={(imageIndex) =>
+            removeGalleryImage(galleryEditorFor, imageIndex)
+          }
           onNewImagesUploaded={(newImgs) => {
             appendImagesToProduct(galleryEditorFor, newImgs);
-            onOpenChange(false);
           }}
         />
       )}
@@ -816,9 +884,13 @@ function parseWebhookResponse(data: unknown): {
 
     const grouped = Array.from(groupedMap.values()).map((group) => ({
       shopify_product_name: group[0].productname,
-      referenceParent: group[0].referenceparent ?? group[0].referenceParent ?? "",
+      referenceParent:
+        group[0].referenceparent ?? group[0].referenceParent ?? "",
       productid: group[0].productid,
-      images: group.map((p) => ({ file_name: p.file_name, file_url: p.file_url })),
+      images: group.map((p) => ({
+        file_name: p.file_name,
+        file_url: p.file_url,
+      })),
     }));
 
     return { filtered, grouped };
