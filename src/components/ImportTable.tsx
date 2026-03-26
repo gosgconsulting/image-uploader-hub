@@ -254,6 +254,7 @@ export function ImportTable({
           handleTriggerWebhook(imp, products);
         }}
         isSending={sendingId === approvalImport?.id}
+        onDataChange={onStatusChange}
       />
     </>
   );
