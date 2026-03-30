@@ -1,7 +1,16 @@
 import { useState } from "react";
 import { format } from "date-fns";
-import { Send, Eye, Loader2, Image as ImageIcon } from "lucide-react";
+import { Send, Eye, Loader2, Image as ImageIcon, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -15,6 +24,7 @@ import { ImagePreviewDialog } from "@/components/ImagePreviewDialog";
 import { SendApprovalDialog, WebhookProduct } from "@/components/SendApprovalDialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { deleteImportWithStorage } from "@/lib/delete-import";
 
 interface ImportImage {
   id: string;
@@ -53,6 +63,8 @@ export function ImportTable({
   onStatusChange,
 }: ImportTableProps) {
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Import | null>(null);
   const [previewImport, setPreviewImport] = useState<Import | null>(null);
   const [approvalImport, setApprovalImport] = useState<Import | null>(null);
   const { toast } = useToast();
@@ -118,6 +130,27 @@ export function ImportTable({
     } finally {
       setSendingId(null);
     }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeletingId(deleteTarget.id);
+    const result = await deleteImportWithStorage(supabase, deleteTarget.id);
+    setDeletingId(null);
+    if (result.ok === false) {
+      toast({
+        title: "Delete failed",
+        description: result.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setDeleteTarget(null);
+    onStatusChange();
+    toast({
+      title: "Import deleted",
+      description: "The import and its images were removed.",
+    });
   };
 
   if (imports.length === 0) {
@@ -228,6 +261,23 @@ export function ImportTable({
                           <Send className="h-3.5 w-3.5" />
                         )}
                       </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeleteTarget(imp)}
+                      disabled={
+                        deletingId !== null ||
+                        sendingId === imp.id ||
+                        imp.status === "processing"
+                      }
+                      aria-label="Delete import"
+                    >
+                      {deletingId === imp.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      )}
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -256,6 +306,42 @@ export function ImportTable({
         isSending={sendingId === approvalImport?.id}
         onDataChange={onStatusChange}
       />
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && deletingId === null) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this import?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the import record, all linked image rows, and every
+              file in storage for this batch. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingId !== null}>
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={deletingId !== null}
+              onClick={handleConfirmDelete}
+            >
+              {deletingId !== null ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete"
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
