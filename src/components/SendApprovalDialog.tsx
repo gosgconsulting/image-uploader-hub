@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Loader2, Pencil, X, Upload } from "lucide-react";
+import { Loader2, Pencil, X, Upload, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 
 interface ImportImage {
   id: string;
@@ -43,6 +44,15 @@ export interface WebhookProduct {
   productname: string;
   referenceparent?: string;
   referenceParent?: string;
+}
+
+/** Image rows returned under `failed` from the map-data webhook (no Shopify product). */
+export interface FailedMapping {
+  id: string;
+  file_name: string;
+  file_url: string;
+  referenceParent: string;
+  error: string;
 }
 
 interface MappedProduct {
@@ -378,6 +388,112 @@ function GalleryEditorDialog({
   );
 }
 
+// ─── Unmatched images (failed mapping) ─────────────────────────────────────────
+
+function FailedMappingsDialog({
+  open,
+  onOpenChange,
+  rows,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  rows: FailedMapping[];
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col gap-3 overflow-hidden p-6">
+        <DialogHeader className="shrink-0 space-y-1.5 p-0">
+          <DialogTitle className="font-mono text-sm flex items-center gap-2 pr-8">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+            Not synced to Shopify ({rows.length})
+          </DialogTitle>
+        </DialogHeader>
+        <p className="shrink-0 text-xs text-muted-foreground">
+          No matching product was found for these files. They are excluded from approve and send
+          until mapping succeeds in your automation.
+        </p>
+        {/* Single scroll container (not the shared Table wrapper) so long lists scroll inside the modal */}
+        <div
+          className={cn(
+            "flex-1 min-h-0 overflow-y-auto rounded-md border overscroll-y-contain",
+            "[scrollbar-gutter:stable]",
+          )}
+          role="region"
+          aria-label="Unmatched images"
+        >
+          <table className="w-full caption-bottom text-sm">
+            <thead className="sticky top-0 z-10 border-b bg-background">
+              <tr className="border-b border-border hover:bg-transparent">
+                <th
+                  scope="col"
+                  className="h-10 w-14 px-3 text-left align-middle font-medium text-muted-foreground font-mono text-[10px] uppercase tracking-wider bg-background"
+                >
+                  Preview
+                </th>
+                <th
+                  scope="col"
+                  className="h-10 px-3 text-left align-middle font-medium text-muted-foreground font-mono text-[10px] uppercase tracking-wider bg-background"
+                >
+                  File
+                </th>
+                <th
+                  scope="col"
+                  className="h-10 px-3 text-left align-middle font-medium text-muted-foreground font-mono text-[10px] uppercase tracking-wider bg-background min-w-[160px]"
+                >
+                  Reason
+                </th>
+              </tr>
+            </thead>
+            <tbody className="[&_tr:last-child]:border-0">
+              {rows.map((row) => (
+                <tr
+                  key={row.id || row.file_url}
+                  className="border-b border-border transition-colors hover:bg-muted/50 align-middle"
+                >
+                  <td className="p-2 align-middle">
+                    {row.file_url ? (
+                      <a
+                        href={row.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block h-11 w-11 rounded border bg-muted overflow-hidden shrink-0 focus:outline-none focus:ring-2 focus:ring-ring"
+                        title="Open image"
+                      >
+                        <img
+                          src={row.file_url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      </a>
+                    ) : (
+                      <div className="h-11 w-11 rounded border border-dashed bg-muted/50" />
+                    )}
+                  </td>
+                  <td className="p-2 align-middle text-xs font-mono max-w-[200px]">
+                    <span className="line-clamp-2 break-all" title={row.file_name}>
+                      {row.file_name || "—"}
+                    </span>
+                  </td>
+                  <td className="p-2 align-middle text-xs text-destructive/90">
+                    <span className="line-clamp-3" title={row.error}>
+                      {row.error}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <DialogFooter className="shrink-0 border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main dialog ───────────────────────────────────────────────────────────────
 
 const MAP_DATA_WEBHOOK_URL =
@@ -393,6 +509,8 @@ export function SendApprovalDialog({
 }: SendApprovalDialogProps) {
   const [loading, setLoading] = useState(false);
   const [rawProducts, setRawProducts] = useState<WebhookProduct[]>([]);
+  const [failedMappings, setFailedMappings] = useState<FailedMapping[]>([]);
+  const [failedMappingsOpen, setFailedMappingsOpen] = useState(false);
   const [editableProducts, setEditableProducts] = useState<MappedProduct[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [featurePickerFor, setFeaturePickerFor] = useState<number | null>(null);
@@ -429,9 +547,10 @@ export function SendApprovalDialog({
       });
 
       const data = await response.json();
-      const { filtered, grouped } = parseWebhookResponse(data);
+      const { filtered, grouped, failed } = parseWebhookResponse(data);
 
       setRawProducts(filtered);
+      setFailedMappings(mergeFailedAndOrphans(filtered, failed, images));
       onDataChange?.();
 
       const freshProducts =
@@ -478,6 +597,7 @@ export function SendApprovalDialog({
         variant: "destructive",
       });
       setRawProducts([]);
+      setFailedMappings([]);
       const fallback = buildFallbackProducts(imp);
       setEditableProducts(fallback);
       setSelectedRows(new Set(fallback.map((_, i) => i)));
@@ -490,6 +610,8 @@ export function SendApprovalDialog({
   useEffect(() => {
     setEditableProducts([]);
     setRawProducts([]);
+    setFailedMappings([]);
+    setFailedMappingsOpen(false);
     setSelectedRows(new Set());
   }, [imp?.id]);
 
@@ -497,6 +619,10 @@ export function SendApprovalDialog({
   useEffect(() => {
     if (open && imp) fetchMapData();
   }, [open, imp?.id]);
+
+  useEffect(() => {
+    if (!open) setFailedMappingsOpen(false);
+  }, [open]);
 
   if (!imp) return null;
 
@@ -638,7 +764,7 @@ export function SendApprovalDialog({
               <p className="text-sm font-mono">Fetching product data…</p>
             </div>
           ) : (
-            <div className="overflow-auto flex-1">
+            <div className="overflow-auto flex-1 min-h-0">
               <div className="rounded-md border">
                 <Table>
                   <TableHeader>
@@ -781,10 +907,25 @@ export function SendApprovalDialog({
             </div>
           )}
 
-          <DialogFooter className="pt-4">
-            <div className="flex items-center text-xs text-muted-foreground mr-auto font-mono">
-              {selectedRows.size} / {editableProducts.length} selected
+          <DialogFooter className="pt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:mr-auto w-full sm:w-auto">
+              <span className="text-xs text-muted-foreground font-mono">
+                {selectedRows.size} / {editableProducts.length} selected
+              </span>
+              {!loading && failedMappings.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full sm:w-auto border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive font-mono text-xs justify-center"
+                  onClick={() => setFailedMappingsOpen(true)}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5 mr-2 shrink-0" />
+                  View unmatched ({failedMappings.length})
+                </Button>
+              )}
             </div>
+            <div className="flex gap-2 justify-end w-full sm:w-auto shrink-0">
             <Button
               variant="outline"
               onClick={() => onOpenChange(false)}
@@ -805,9 +946,16 @@ export function SendApprovalDialog({
                 `Approve & Send (${selectedRows.size})`
               )}
             </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <FailedMappingsDialog
+        open={failedMappingsOpen}
+        onOpenChange={setFailedMappingsOpen}
+        rows={failedMappings}
+      />
 
       {/* Feature image picker */}
       {featurePickerFor !== null && (
@@ -858,22 +1006,236 @@ export function SendApprovalDialog({
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
+const FAILED_KEYS = [
+  "failed",
+  "Failed",
+  "failures",
+  "errors",
+  "unmatched",
+  "notMatched",
+  "failed_mappings",
+] as const;
+
+function unwrapWebhookRoot(raw: unknown, depth = 0): unknown {
+  if (depth > 6 || raw == null) return raw;
+  if (Array.isArray(raw)) {
+    if (raw.length === 1 && typeof raw[0] === "object" && raw[0] !== null) {
+      const only = raw[0] as Record<string, unknown>;
+      if (
+        !Array.isArray(only.products) &&
+        !Array.isArray(only.successful) &&
+        !Array.isArray(only.failed) &&
+        typeof only.json === "object"
+      ) {
+        return unwrapWebhookRoot(only.json, depth + 1);
+      }
+    }
+    return raw;
+  }
+  if (typeof raw !== "object") return raw;
+  const o = raw as Record<string, unknown>;
+  const inner =
+    o.json ??
+    o.data ??
+    o.body ??
+    o.output ??
+    o.result ??
+    o.response;
+  if (inner !== undefined && typeof inner === "object") {
+    return unwrapWebhookRoot(inner, depth + 1);
+  }
+  return raw;
+}
+
+function collectArrays(
+  obj: Record<string, unknown> | undefined,
+  keys: readonly string[],
+): Record<string, unknown>[] {
+  if (!obj) return [];
+  const out: Record<string, unknown>[] = [];
+  const o = obj as Record<string, unknown>;
+  for (const k of keys) {
+    const v = o[k];
+    if (Array.isArray(v)) out.push(...(v as Record<string, unknown>[]));
+  }
+  return out;
+}
+
+function isFailedRow(row: Record<string, unknown>): boolean {
+  const st = String(row.status ?? row.state ?? "").toLowerCase();
+  if (st === "failed" || st === "error" || st === "failure") return true;
+  const pid = row.productid;
+  const hasPid = pid != null && String(pid).trim() !== "";
+  if (!hasPid && row.file_url) return true;
+  return false;
+}
+
+function partitionProductsByStatus(
+  rows: Record<string, unknown>[],
+): { ok: Record<string, unknown>[]; bad: Record<string, unknown>[] } {
+  const ok: Record<string, unknown>[] = [];
+  const bad: Record<string, unknown>[] = [];
+  for (const row of rows) {
+    if (isFailedRow(row)) bad.push(row);
+    else ok.push(row);
+  }
+  return { ok, bad };
+}
+
+function extractWebhookPayloads(raw: unknown): {
+  successRows: Record<string, unknown>[];
+  failedRows: Record<string, unknown>[];
+} {
+  const successRows: Record<string, unknown>[] = [];
+  const failedRows: Record<string, unknown>[] = [];
+
+  const root = unwrapWebhookRoot(raw);
+  const candidates: Record<string, unknown>[] = [];
+
+  if (Array.isArray(root)) {
+    for (const item of root) {
+      if (item && typeof item === "object") {
+        candidates.push(item as Record<string, unknown>);
+      }
+    }
+  } else if (root && typeof root === "object") {
+    candidates.push(root as Record<string, unknown>);
+  }
+
+  for (const obj of candidates) {
+    successRows.push(
+      ...collectArrays(obj, ["successful", "Successful", "success", "matched"]),
+    );
+    for (const k of FAILED_KEYS) {
+      const v = obj[k];
+      if (Array.isArray(v)) failedRows.push(...(v as Record<string, unknown>[]));
+    }
+  }
+
+  const productBlobs: Record<string, unknown>[] = [];
+  for (const obj of candidates) {
+    if (Array.isArray(obj.products)) {
+      productBlobs.push(...(obj.products as Record<string, unknown>[]));
+    }
+  }
+
+  if (productBlobs.length > 0) {
+    const { ok, bad } = partitionProductsByStatus(productBlobs);
+    if (successRows.length === 0) successRows.push(...ok);
+    else {
+      for (const row of ok) {
+        if (!successRows.includes(row)) successRows.push(row);
+      }
+    }
+    failedRows.push(...bad);
+  }
+
+  if (successRows.length === 0 && productBlobs.length === 0) {
+    const r = root as Record<string, unknown> | unknown[];
+    let legacy: Record<string, unknown>[] = [];
+    if (!Array.isArray(r) && r && typeof r === "object" && Array.isArray(r.products)) {
+      legacy = r.products as Record<string, unknown>[];
+    } else if (
+      Array.isArray(r) &&
+      r[0] &&
+      typeof r[0] === "object" &&
+      Array.isArray((r[0] as Record<string, unknown>).products)
+    ) {
+      legacy = (r[0] as { products: Record<string, unknown>[] }).products;
+    }
+    const { ok, bad } = partitionProductsByStatus(legacy);
+    successRows.push(...ok);
+    failedRows.push(...bad);
+  }
+
+  return { successRows, failedRows };
+}
+
+function rowToWebhookProduct(row: Record<string, unknown>): WebhookProduct | null {
+  const productid = String(row.productid ?? "");
+  if (!productid) return null;
+  const file_name = String(
+    row.original_file_name ?? row.file_name ?? "",
+  );
+  const ref =
+    (row.referenceparent as string | undefined) ??
+    (row.referenceParent as string | undefined);
+  return {
+    id: String(row.id ?? ""),
+    file_name,
+    file_url: String(row.file_url ?? ""),
+    productid,
+    productname: String(row.productname ?? ""),
+    referenceparent: ref,
+    referenceParent: ref,
+  };
+}
+
+function rowToFailedMapping(row: Record<string, unknown>): FailedMapping {
+  const err =
+    row.error ??
+    row.message ??
+    row.reason ??
+    row.detail ??
+    "No matching product found on Shopify";
+  return {
+    id: String(row.id ?? ""),
+    file_name: String(row.original_file_name ?? row.file_name ?? ""),
+    file_url: String(row.file_url ?? ""),
+    referenceParent: String(
+      row.referenceparent ?? row.referenceParent ?? "",
+    ),
+    error: String(err),
+  };
+}
+
+/** Combine webhook `failed` rows with import images that never appear on a matched row. */
+function mergeFailedAndOrphans(
+  filtered: WebhookProduct[],
+  failed: FailedMapping[],
+  images: ImportImage[],
+): FailedMapping[] {
+  const byUrl = new Map<string, FailedMapping>();
+  for (const f of failed) {
+    if (f.file_url) byUrl.set(f.file_url, f);
+  }
+  if (filtered.length === 0) return [...byUrl.values()];
+
+  const successUrls = new Set(
+    filtered.map((p) => p.file_url).filter(Boolean),
+  );
+  for (const img of images) {
+    if (!img.file_url || successUrls.has(img.file_url)) continue;
+    if (byUrl.has(img.file_url)) continue;
+    byUrl.set(img.file_url, {
+      id: img.id,
+      file_name: img.file_name,
+      file_url: img.file_url,
+      referenceParent: "",
+      error:
+        "Not included in any matched Shopify product for this batch. Check filename, reference, or the mapping workflow output.",
+    });
+  }
+  return [...byUrl.values()];
+}
+
 function parseWebhookResponse(data: unknown): {
   filtered: WebhookProduct[];
   grouped: MappedProduct[];
+  failed: FailedMapping[];
 } {
+  const empty = { filtered: [] as WebhookProduct[], grouped: [] as MappedProduct[], failed: [] as FailedMapping[] };
   try {
-    const raw = data as any;
-    let products: WebhookProduct[] = [];
+    const { successRows, failedRows } = extractWebhookPayloads(data);
+    const failed = failedRows.map(rowToFailedMapping);
 
-    if (Array.isArray(raw?.products)) {
-      products = raw.products;
-    } else if (Array.isArray(raw) && Array.isArray(raw[0]?.products)) {
-      products = raw[0].products;
+    const filtered = successRows
+      .map(rowToWebhookProduct)
+      .filter((p): p is WebhookProduct => p !== null);
+
+    if (filtered.length === 0) {
+      return { ...empty, failed };
     }
-
-    const filtered = products.filter((p) => p.productid);
-    if (filtered.length === 0) return { filtered: [], grouped: [] };
 
     const groupedMap = new Map<string, WebhookProduct[]>();
     for (const item of filtered) {
@@ -893,9 +1255,9 @@ function parseWebhookResponse(data: unknown): {
       })),
     }));
 
-    return { filtered, grouped };
+    return { filtered, grouped, failed };
   } catch {
-    return { filtered: [], grouped: [] };
+    return empty;
   }
 }
 
