@@ -1,7 +1,8 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
-import { DollarSign } from "lucide-react";
+import { useState, useMemo, useCallback } from "react";
+import { DollarSign, Plus } from "lucide-react";
 import { RefundTable } from "@/components/RefundTable";
-import { WebhookSettings } from "@/components/WebhookSettings";
+import { ShopifySettings } from "@/components/ShopifySettings";
+import { RefundImportDialog } from "@/components/RefundImportDialog";
 import { RefundFilters, StatusFilter, DateSort } from "@/components/RefundFilters";
 import { BulkRefundDialog } from "@/components/BulkRefundDialog";
 import { Button } from "@/components/ui/button";
@@ -9,20 +10,28 @@ import { useToast } from "@/hooks/use-toast";
 import { mockRefunds } from "@/refund.mock";
 import type { Refund } from "@/refund.mock";
 import { calculateRefundAmount } from "@/utils/refundCalculation";
+import { fetchShopifyOrderDetails } from "@/utils/shopifyOrder";
 
 export default function Refund() {
-  // Initialize refunds with calculated refund amounts
   const [refunds, setRefunds] = useState<Refund[]>(() => {
-    // Calculate refund amounts for all refunds on initialization
-    return mockRefunds.map(refund => ({
+    return mockRefunds.map((refund) => ({
       ...refund,
       calculatedRefund: calculateRefundAmount(refund.id, refund.returnFee),
     }));
   });
-  const [webhookUrl, setWebhookUrl] = useState(
-    () => localStorage.getItem("webhook_url") || ""
+  const [shopifyShop, setShopifyShop] = useState(
+    () => localStorage.getItem("shopify_shop") || ""
   );
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(["completed", "processing", "pending", "failed"]);
+  const [shopifyToken, setShopifyToken] = useState(
+    () => localStorage.getItem("shopify_admin_token") || ""
+  );
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>([
+    "completed",
+    "processing",
+    "pending",
+    "failed",
+  ]);
   const [dateSort, setDateSort] = useState<DateSort>("desc");
   const [selectedRefundIds, setSelectedRefundIds] = useState<Set<string>>(new Set());
   const [bulkRefundDialogOpen, setBulkRefundDialogOpen] = useState(false);
@@ -35,18 +44,90 @@ export default function Refund() {
     );
   }, []);
 
+  const enrichImportedRefunds = useCallback(
+    async (rows: Refund[]) => {
+      const shop = shopifyShop.trim();
+      const token = shopifyToken.trim();
+      const targets = rows.filter(
+        (r) => r.shopifyFetchStatus === "loading" && r.shopifyNumericOrderId
+      );
+
+      if (targets.length === 0) return;
+
+      if (!shop || !token) {
+        setRefunds((prev) =>
+          prev.map((r) => {
+            if (!targets.some((t) => t.id === r.id)) return r;
+            return {
+              ...r,
+              shopifyFetchStatus: "error",
+              shopifyFetchError: "Configure Shopify shop and Admin API token.",
+            };
+          })
+        );
+        toast({
+          title: "Shopify not configured",
+          description: "Open Shopify API settings and save your shop domain and token.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      for (const r of targets) {
+        try {
+          const details = await fetchShopifyOrderDetails(
+            shop,
+            token,
+            r.shopifyNumericOrderId!
+          );
+          setRefunds((prev) =>
+            prev.map((x) =>
+              x.id === r.id
+                ? {
+                    ...x,
+                    shopifyFetchStatus: "ok",
+                    shopifyProducts: details.products,
+                    originalAmount: details.originalAmount,
+                    calculatedRefund: details.calculatedRefund,
+                    shopifyFetchError: undefined,
+                  }
+                : x
+            )
+          );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "Request failed";
+          setRefunds((prev) =>
+            prev.map((x) =>
+              x.id === r.id
+                ? {
+                    ...x,
+                    shopifyFetchStatus: "error",
+                    shopifyFetchError: message,
+                  }
+                : x
+            )
+          );
+        }
+      }
+    },
+    [shopifyShop, shopifyToken, toast]
+  );
+
+  const handleImported = useCallback(
+    (rows: Refund[]) => {
+      setRefunds((prev) => [...rows, ...prev]);
+      void enrichImportedRefunds(rows);
+    },
+    [enrichImportedRefunds]
+  );
+
   const filteredAndSortedRefunds = useMemo(() => {
     let filtered = [...refunds];
 
-    // Apply status filter (always at least one status is selected)
     if (statusFilter.length > 0) {
       filtered = filtered.filter((r) => statusFilter.includes(r.status));
-    } else {
-      // Fallback: if somehow empty, show all (shouldn't happen due to validation)
-      // This ensures we always show something
     }
 
-    // Apply date sort
     if (dateSort !== "none") {
       filtered.sort((a, b) => {
         const dateA = new Date(a.date).getTime();
@@ -54,7 +135,6 @@ export default function Refund() {
         return dateSort === "desc" ? dateB - dateA : dateA - dateB;
       });
     } else {
-      // Default: most recent first
       filtered.sort((a, b) => {
         const dateA = new Date(a.date).getTime();
         const dateB = new Date(b.date).getTime();
@@ -71,7 +151,7 @@ export default function Refund() {
   }, []);
 
   const selectedRefunds = useMemo(() => {
-    return filteredAndSortedRefunds.filter(r => selectedRefundIds.has(r.id));
+    return filteredAndSortedRefunds.filter((r) => selectedRefundIds.has(r.id));
   }, [filteredAndSortedRefunds, selectedRefundIds]);
 
   const handleBulkRefund = useCallback(() => {
@@ -81,24 +161,22 @@ export default function Refund() {
 
   const handleConfirmBulkRefund = useCallback(async () => {
     setIsProcessingBulkRefund(true);
-    
-    // Process each selected refund
-    const processableRefunds = selectedRefunds.filter(r => r.status !== "failed");
-    
+
+    const processableRefunds = selectedRefunds.filter((r) => r.status !== "failed");
+
     for (const refund of processableRefunds) {
       if (refund.status === "pending") {
         handleRefundUpdate(refund.id, { status: "processing" });
       }
-      
-      // Simulate async processing for each refund
-      await new Promise(resolve => setTimeout(resolve, 500));
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
       handleRefundUpdate(refund.id, { status: "completed" });
     }
 
     setIsProcessingBulkRefund(false);
     setBulkRefundDialogOpen(false);
     setSelectedRefundIds(new Set());
-    
+
     toast({
       title: "Bulk refund processed",
       description: `Successfully processed ${processableRefunds.length} refund${processableRefunds.length === 1 ? "" : "s"}.`,
@@ -108,7 +186,6 @@ export default function Refund() {
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-7xl px-6 py-10">
-        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-md bg-primary flex items-center justify-center">
@@ -124,15 +201,15 @@ export default function Refund() {
 
           <div className="flex items-center gap-2">
             {selectedRefundIds.size > 0 && (
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleBulkRefund}
-              >
+              <Button variant="default" size="sm" onClick={handleBulkRefund}>
                 <DollarSign className="h-3.5 w-3.5 mr-1.5" />
                 Refund ({selectedRefundIds.size})
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              New import
+            </Button>
             <RefundFilters
               statusFilter={statusFilter}
               dateSort={dateSort}
@@ -140,14 +217,15 @@ export default function Refund() {
               onDateSortChange={setDateSort}
               onClearFilters={handleClearFilters}
             />
-            <WebhookSettings
-              webhookUrl={webhookUrl}
-              onWebhookUrlChange={setWebhookUrl}
+            <ShopifySettings
+              shop={shopifyShop}
+              adminAccessToken={shopifyToken}
+              onShopChange={setShopifyShop}
+              onAdminTokenChange={setShopifyToken}
             />
           </div>
         </div>
 
-        {/* Table */}
         <RefundTable
           refunds={filteredAndSortedRefunds}
           onRefundUpdate={handleRefundUpdate}
@@ -155,7 +233,12 @@ export default function Refund() {
           onSelectionChange={setSelectedRefundIds}
         />
 
-        {/* Bulk Refund Dialog */}
+        <RefundImportDialog
+          open={importDialogOpen}
+          onOpenChange={setImportDialogOpen}
+          onImported={handleImported}
+        />
+
         <BulkRefundDialog
           open={bulkRefundDialogOpen}
           onOpenChange={setBulkRefundDialogOpen}

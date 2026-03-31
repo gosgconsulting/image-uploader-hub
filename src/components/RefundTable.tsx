@@ -1,6 +1,6 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { format } from "date-fns";
-import { X, DollarSign } from "lucide-react";
+import { X, DollarSign, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -220,14 +220,34 @@ export function RefundTable({
                 <TableCell className="font-mono text-xs">
                   {format(new Date(refund.orderDate), "MMM dd, yyyy")}
                 </TableCell>
-                <TableCell 
+                <TableCell
                   className="font-mono text-xs tabular-nums cursor-pointer hover:text-primary transition-colors"
                   onClick={() => {
+                    if (refund.shopifyFetchStatus === "loading") return;
+                    if (refund.shopifyFetchStatus === "error") {
+                      toast({
+                        title: "Could not load Shopify order",
+                        description:
+                          refund.shopifyFetchError ||
+                          "Check Shopify API settings and the order id in your file.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
                     setSelectedRefundForDetails(refund);
                     setRefundDetailsModalOpen(true);
                   }}
                 >
-                  €{refund.calculatedRefund.toFixed(2)}
+                  {refund.shopifyFetchStatus === "loading" ? (
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      …
+                    </span>
+                  ) : refund.shopifyFetchStatus === "error" ? (
+                    <span className="text-destructive text-[11px]">—</span>
+                  ) : (
+                    `€${refund.calculatedRefund.toFixed(2)}`
+                  )}
                 </TableCell>
                 <TableCell className="text-sm">
                   {refund.reasonOfReturn}

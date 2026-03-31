@@ -1,7 +1,11 @@
+import type { Product } from "@/utils/refundCalculation";
+
+export type ShopifyFetchStatus = "idle" | "loading" | "ok" | "error";
+
 export interface Refund {
   id: string;
   date: string;
-  source: "FRNCH - Service : SHOP2SHOP" | "FRNCH - Service : MONDIAL_RELAY" | "Zalando Partner" | "FRNCH - Service : COLISSIMO";
+  source: string;
   orderId: string;
   customer: string;
   skus: string[];
@@ -14,6 +18,13 @@ export interface Refund {
   aiConfidence: number; // 0-1
   status: "completed" | "processing" | "pending" | "failed";
   pdfUrl?: string;
+  /** Numeric id for Shopify Admin API (from sheet / lien_shopify) */
+  shopifyNumericOrderId?: string;
+  sheetPageKey?: string;
+  sheetProductNames?: string[];
+  shopifyFetchStatus?: ShopifyFetchStatus;
+  shopifyProducts?: Product[];
+  shopifyFetchError?: string;
 }
 
 const REASON_OF_RETURN_OPTIONS = ["Trop grand", "Ne me plaît pas"];

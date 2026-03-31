@@ -45,12 +45,17 @@ export function RefundDetailsModal({
   const [pdfTotalPages, setPdfTotalPages] = useState<number>(47);
   const [pdfName, setPdfName] = useState<string>("20260203145934236.pdf");
 
-  // Initialize products when modal opens
   useEffect(() => {
     if (open && refund) {
-      // Use shared calculation logic to get products and ensure consistency
-      const { products: generatedProducts } = getRefundCalculationData(refund.id, refund.returnFee);
-      setProducts(generatedProducts);
+      if (refund.shopifyProducts && refund.shopifyProducts.length > 0) {
+        setProducts(refund.shopifyProducts);
+      } else {
+        const { products: generatedProducts } = getRefundCalculationData(
+          refund.id,
+          refund.returnFee
+        );
+        setProducts(generatedProducts);
+      }
       setReturnFees(Math.abs(refund.returnFee));
       
       // Use the refund amount from the parent (pre-calculated, source of truth)
@@ -66,7 +71,13 @@ export function RefundDetailsModal({
       setIsInitialized(false);
       setIsManualRefundAmount(false);
     }
-  }, [open, refund?.id, refund?.calculatedRefund, refund?.returnFee]);
+  }, [
+    open,
+    refund?.id,
+    refund?.calculatedRefund,
+    refund?.returnFee,
+    refund?.shopifyProducts,
+  ]);
 
   // Calculate total from products
   const total = useMemo(() => {
@@ -102,13 +113,6 @@ export function RefundDetailsModal({
         refundAmount,
       });
     }
-    console.log("Refund details saved:", {
-      refundId: refund?.id,
-      products,
-      returnFees,
-      refundAmount,
-      total,
-    });
     onOpenChange(false);
   };
 
@@ -120,12 +124,22 @@ export function RefundDetailsModal({
         <div className="flex h-[85vh]">
           {/* Left Panel - PDF Preview (45%) */}
           <div className="w-[45%] border-r flex flex-col bg-muted/20">
-            <div className="flex-1 p-6 min-h-0">
-              <div className="h-full border-2 border-dashed border-muted-foreground/20 rounded-lg flex items-center justify-center bg-background shadow-sm">
-                <div className="text-center text-muted-foreground">
-                  <p className="font-mono text-sm mb-2 font-medium">PDF Preview</p>
-                  <p className="font-mono text-xs">Placeholder for PDF viewer</p>
-                </div>
+            <div className="flex-1 p-6 min-h-0 min-w-0">
+              <div className="h-full min-h-[320px] border-2 border-dashed border-muted-foreground/20 rounded-lg overflow-hidden bg-background shadow-sm">
+                {refund.pdfUrl ? (
+                  <iframe
+                    title="Refund PDF"
+                    src={refund.pdfUrl}
+                    className="w-full h-full min-h-[320px] border-0"
+                  />
+                ) : (
+                  <div className="h-full flex items-center justify-center text-muted-foreground">
+                    <div className="text-center">
+                      <p className="font-mono text-sm mb-2 font-medium">PDF Preview</p>
+                      <p className="font-mono text-xs">No PDF attached</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="p-6 border-t bg-background flex-shrink-0">
