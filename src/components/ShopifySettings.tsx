@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isShopifyCredentialsSupabasePersistenceEnabled } from "@/lib/shopify-credentials";
 
 interface ShopifySettingsProps {
   shop: string;
@@ -115,8 +116,18 @@ export function ShopifySettings({
           </div>
           <p className="text-[11px] text-muted-foreground leading-snug">
             Use the <span className="font-mono">*.myshopify.com</span> hostname only (not a full Admin API
-            URL). Signed-in users can save the token to Supabase for server-side refunds. Until then, the
-            token stays in this browser (localStorage) for dev import enrichment via the Vite proxy.
+            URL).{" "}
+            {isShopifyCredentialsSupabasePersistenceEnabled() ? (
+              <>
+                Signed-in users can save the token to Supabase for server-side refunds. Until then, the token
+                stays in this browser (localStorage) for dev import enrichment via the Vite proxy.
+              </>
+            ) : (
+              <>
+                Supabase token storage is disabled for this build; the Admin token stays in this browser
+                (localStorage) only.
+              </>
+            )}
           </p>
           {connectionError ? (
             <p className="text-[11px] text-destructive leading-snug" role="alert">

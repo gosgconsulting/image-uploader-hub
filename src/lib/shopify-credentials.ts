@@ -1,9 +1,26 @@
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
 
+/** Opt-in: default false when unset (missing Vite env key). */
+export function parseSaveShopifyCredentialsEnv(raw: string | undefined): boolean {
+  if (raw === undefined || raw === "") return false;
+  const lower = String(raw).toLowerCase().trim();
+  return ["true", "1", "yes", "on"].includes(lower);
+}
+
+/**
+ * When true (`VITE_SAVE_SHOPIFY_CREDENTIALS`), the app reads/writes `shopify_credentials`.
+ * Default: off (tokens stay in the browser only unless explicitly enabled).
+ */
+export function isShopifyCredentialsSupabasePersistenceEnabled(): boolean {
+  return parseSaveShopifyCredentialsEnv(import.meta.env.VITE_SAVE_SHOPIFY_CREDENTIALS);
+}
+
 export async function fetchShopifyCredential(
   shopDomain: string
 ): Promise<{ access_token: string } | null> {
+  if (!isShopifyCredentialsSupabasePersistenceEnabled()) return null;
+
   const domain = normalizeShopDomain(shopDomain);
   if (!domain) return null;
 
@@ -21,6 +38,10 @@ export async function upsertShopifyCredential(
   shopDomain: string,
   accessToken: string
 ): Promise<{ error: Error | null }> {
+  if (!isShopifyCredentialsSupabasePersistenceEnabled()) {
+    return { error: null };
+  }
+
   const domain = normalizeShopDomain(shopDomain);
   if (!domain || !accessToken.trim()) {
     return { error: new Error("Shop domain and access token are required") };

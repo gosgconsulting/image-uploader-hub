@@ -14,7 +14,11 @@ import {
   insertRefunds,
   updateRefund,
 } from "@/lib/refund-db";
-import { fetchShopifyCredential, upsertShopifyCredential } from "@/lib/shopify-credentials";
+import {
+  fetchShopifyCredential,
+  isShopifyCredentialsSupabasePersistenceEnabled,
+  upsertShopifyCredential,
+} from "@/lib/shopify-credentials";
 import { invokeProcessShopifyRefunds } from "@/lib/processShopifyRefunds";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchShopifyOrderDetails } from "@/utils/shopifyOrder";
@@ -77,6 +81,14 @@ export default function Refund() {
         data: { session },
       } = await supabase.auth.getSession();
       if (session && token.trim()) {
+        if (!isShopifyCredentialsSupabasePersistenceEnabled()) {
+          toast({
+            title: "Saved locally only",
+            description:
+              "Saving Shopify tokens to Supabase is off (set VITE_SAVE_SHOPIFY_CREDENTIALS=true to enable).",
+          });
+          return { serverSaved: false };
+        }
         const { error } = await upsertShopifyCredential(shop, token);
         if (!error) {
           toast({

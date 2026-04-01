@@ -38,6 +38,7 @@ Configure the Shopify custom app with at least:
 
 ### Credentials (`shopify_credentials`)
 
+- **Client toggle**: Set `VITE_SAVE_SHOPIFY_CREDENTIALS=true` in the Vite env to persist Admin tokens in `shopify_credentials` for server-side refunds. Default (unset) is browser-only (localStorage).
 - One row per `(user_id, shop_domain)` storing the Admin API access token.
 - **RLS**: Users can `select` / `insert` / `update` / `delete` only rows where `user_id = auth.uid()`.
 - **Plaintext token in Postgres** is acceptable only for a trusted operator surface; prefer **Shopify OAuth** for production-style deployments so tokens are scoped and revocable without DB reads.
