@@ -1,0 +1,37 @@
+---
+description: Core engineering principles, file limits, validation, errors, and PLAN-ACT-REFLECT workflow
+alwaysApply: true
+---
+
+# Principles and standards
+
+- **Architect first:** Do not implement non-trivial changes without a plan. Before coding, read `architecture.md` (repo root or documented location). If it is missing, say so once and proceed from README/TODO or ask where architecture lives.
+- **Atomic modules:** Keep files under **250 lines**. If a file exceeds that, refactor into sub-modules in the same feature area; do not grow monoliths.
+- **Functional style:** Prefer pure functions and immutability where it fits the existing codebase.
+- **Validation:** Validate external and user-facing inputs with **Zod** (or the project’s existing equivalent if already chosen—stay consistent).
+- **Error handling:** No silent failures. Prefer **typed error results** (e.g. `Result` / discriminated unions) for expected control flow; use exceptions only for truly exceptional paths. Log or surface errors appropriately.
+
+# Workflow: PLAN → ACT → REFLECT
+
+Follow this loop for **every** user request (scale depth to task size: a one-line typo still gets a mental plan; large work gets an explicit written plan).
+
+## Phase 1 — PLAN
+
+1. Read `architecture.md` and `progress.md`. If absent, note that and use README/TODO.md per project convention.
+2. In chat, propose a short plan: goals, affected files, and key logic changes.
+3. **Wait for user approval** before implementing, unless the user already approved this plan in the same turn or explicitly asked to skip planning for this request.
+
+## Phase 2 — ACT
+
+1. Change code in **small batches**; keep diffs reviewable.
+2. Follow the **existing** directory structure and naming; do not invent new top-level layouts without agreement.
+3. Comments explain **why** (intent, tradeoffs, non-obvious constraints), not **what** the next line does.
+
+## Phase 3 — REFLECT
+
+1. Before finishing, self-review: breaking changes? regressions? types strict enough? dead code removed?
+2. Update `progress.md` with what shipped and current status (create a minimal `progress.md` if the team uses it and it does not exist yet).
+
+# Interaction with project docs
+
+- This rule does **not** replace README/TODO workflow: when the project uses `TODO.md` for tasks, still follow that for task pick-up and completion markers alongside `progress.md` updates where both apply.
