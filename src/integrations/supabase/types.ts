@@ -76,6 +76,84 @@ export type Database = {
         }
         Relationships: []
       }
+      refunds: {
+        Row: {
+          id: string
+          date: string
+          source: string
+          order_id: string
+          customer: string
+          skus: Json
+          qty: number
+          order_date: string
+          original_amount: number
+          return_fee: number
+          calculated_refund: number
+          reason_of_return: string
+          ai_confidence: number
+          status: string
+          pdf_url: string | null
+          shopify_numeric_order_id: string | null
+          sheet_page_key: string | null
+          sheet_product_names: Json | null
+          shopify_fetch_status: string | null
+          shopify_products: Json | null
+          shopify_fetch_error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          date?: string
+          source?: string
+          order_id: string
+          customer?: string
+          skus?: Json
+          qty?: number
+          order_date: string
+          original_amount?: number
+          return_fee?: number
+          calculated_refund?: number
+          reason_of_return?: string
+          ai_confidence?: number
+          status?: string
+          pdf_url?: string | null
+          shopify_numeric_order_id?: string | null
+          sheet_page_key?: string | null
+          sheet_product_names?: Json | null
+          shopify_fetch_status?: string | null
+          shopify_products?: Json | null
+          shopify_fetch_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          date?: string
+          source?: string
+          order_id?: string
+          customer?: string
+          skus?: Json
+          qty?: number
+          order_date?: string
+          original_amount?: number
+          return_fee?: number
+          calculated_refund?: number
+          reason_of_return?: string
+          ai_confidence?: number
+          status?: string
+          pdf_url?: string | null
+          shopify_numeric_order_id?: string | null
+          sheet_page_key?: string | null
+          sheet_product_names?: Json | null
+          shopify_fetch_status?: string | null
+          shopify_products?: Json | null
+          shopify_fetch_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

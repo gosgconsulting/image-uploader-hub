@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import type { Refund } from "@/refund.mock";
+import type { Refund } from "@/types/refund";
 
 export interface ParsedRefundGroup {
   pageKey: string;

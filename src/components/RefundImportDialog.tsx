@@ -10,7 +10,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import type { Refund } from "@/refund.mock";
+import { supabase } from "@/integrations/supabase/client";
+import type { Refund } from "@/types/refund";
 import {
   parseRefundSpreadsheetBuffer,
   groupsToRefundRows,
@@ -19,7 +20,11 @@ import {
 interface RefundImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImported: (rows: Refund[]) => void;
+  onImported: (rows: Refund[]) => void | Promise<void>;
+}
+
+function storageSafeFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200) || "document.pdf";
 }
 
 const ACCEPT_SHEET =
@@ -81,10 +86,21 @@ export function RefundImportDialog({
       const groups = parseRefundSpreadsheetBuffer(buffer);
       let pdfUrl: string | undefined;
       if (pdfFile) {
-        pdfUrl = URL.createObjectURL(pdfFile);
+        const path = `${crypto.randomUUID()}-${storageSafeFileName(pdfFile.name)}`;
+        const { error: uploadError } = await supabase.storage
+          .from("refund-pdfs")
+          .upload(path, pdfFile, {
+            contentType: pdfFile.type || "application/pdf",
+            upsert: false,
+          });
+        if (uploadError) {
+          throw new Error(uploadError.message);
+        }
+        const { data: urlData } = supabase.storage.from("refund-pdfs").getPublicUrl(path);
+        pdfUrl = urlData.publicUrl;
       }
       const rows = groupsToRefundRows(groups, pdfUrl);
-      onImported(rows);
+      await onImported(rows);
       toast({
         title: "Import added",
         description: `${rows.length} row(s) from spreadsheet (grouped by page).`,

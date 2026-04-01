@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Refund } from "@/refund.mock";
+import type { Refund } from "@/types/refund";
 import { EditRefundDialog } from "@/components/EditRefundDialog";
 import { ViewPdfDialog } from "@/components/ViewPdfDialog";
 import { RefundDetailsModal } from "@/components/RefundDetailsModal";

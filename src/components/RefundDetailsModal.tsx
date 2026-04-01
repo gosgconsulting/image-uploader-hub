@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Refund } from "@/refund.mock";
+import type { Refund } from "@/types/refund";
 import { getRefundCalculationData, Product } from "@/utils/refundCalculation";
 
 interface RefundDetailsModalProps {

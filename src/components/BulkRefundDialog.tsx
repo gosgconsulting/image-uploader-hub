@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Refund } from "@/refund.mock";
+import type { Refund } from "@/types/refund";
 
 interface BulkRefundDialogProps {
   open: boolean;

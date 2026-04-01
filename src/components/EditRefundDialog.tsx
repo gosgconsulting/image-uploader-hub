@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Refund } from "@/refund.mock";
+import type { Refund } from "@/types/refund";
 
 interface EditRefundDialogProps {
   open: boolean;
