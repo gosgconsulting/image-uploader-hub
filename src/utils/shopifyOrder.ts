@@ -6,12 +6,66 @@ import {
 
 const SHOPIFY_API_VERSION = SHOPIFY_ADMIN_API_VERSION;
 
-function buildOrderUrl(shopHost: string, numericOrderId: string): string {
-  const path = `/admin/api/${SHOPIFY_API_VERSION}/orders/${numericOrderId}.json`;
+/** Path after API version, e.g. `/shop.json` or `/orders/123.json`. */
+function buildAdminApiUrl(shopHost: string, pathAfterVersion: string): string {
+  const rel = pathAfterVersion.startsWith("/") ? pathAfterVersion : `/${pathAfterVersion}`;
+  const path = `/admin/api/${SHOPIFY_API_VERSION}${rel}`;
   if (import.meta.env.DEV) {
     return `/shopify-proxy/${encodeURIComponent(shopHost)}${path}`;
   }
   return `https://${shopHost}${path}`;
+}
+
+function buildOrderUrl(shopHost: string, numericOrderId: string): string {
+  return buildAdminApiUrl(shopHost, `/orders/${numericOrderId}.json`);
+}
+
+export type ShopifyConnectionResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/** Lightweight Admin API check (GET shop) before persisting credentials. */
+export async function testShopifyAdminConnection(
+  shop: string,
+  adminAccessToken: string
+): Promise<ShopifyConnectionResult> {
+  const shopHost = normalizeShopDomain(shop);
+  if (!shopHost) {
+    return { ok: false, error: "Enter your shop domain." };
+  }
+  const token = adminAccessToken.trim();
+  if (!token) {
+    return { ok: false, error: "Enter your Admin API access token." };
+  }
+
+  const url = buildAdminApiUrl(shopHost, "/shop.json");
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "X-Shopify-Access-Token": token,
+        Accept: "application/json",
+      },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Network error";
+    return { ok: false, error: `Could not reach Shopify (${msg}). Check the shop domain and your network.` };
+  }
+
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & {
+    errors?: unknown;
+  };
+
+  if (!res.ok) {
+    const err = data.errors;
+    let msg = `Shopify returned ${res.status}`;
+    if (typeof err === "string") msg = err;
+    else if (err && typeof err === "object") msg = JSON.stringify(err);
+    return { ok: false, error: msg };
+  }
+
+  return { ok: true };
 }
 
 interface ShopifyLineItem {

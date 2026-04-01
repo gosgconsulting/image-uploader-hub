@@ -81,10 +81,14 @@ export function pickParentAndRefundAmount(
   };
 }
 
+/** Keep in sync with `src/lib/shopifyAdminApi.ts` — hostname only, not a pasted API path. */
 export function normalizeShopDomain(shop: string): string {
-  return shop
+  let s = shop
     .trim()
     .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "");
+  const stop = s.search(/[/?#]/);
+  if (stop !== -1) s = s.slice(0, stop);
+  return s;
 }

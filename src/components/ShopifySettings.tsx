@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Store, Check } from "lucide-react";
+import { testShopifyAdminConnection } from "@/utils/shopifyOrder";
 import {
   Popover,
   PopoverContent,
@@ -29,6 +30,7 @@ export function ShopifySettings({
   const [tokenValue, setTokenValue] = useState(adminAccessToken);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   useEffect(() => {
     setShopValue(shop);
@@ -41,11 +43,24 @@ export function ShopifySettings({
   const handleSave = async () => {
     const s = shopValue.trim();
     const t = tokenValue.trim();
-    onShopChange(s);
-    onAdminTokenChange(t);
-    localStorage.setItem("shopify_shop", s);
+    setConnectionError(null);
     setSaving(true);
     try {
+      if (t) {
+        if (!s) {
+          setConnectionError("Enter your shop domain before saving a token.");
+          return;
+        }
+        const ping = await testShopifyAdminConnection(s, t);
+        if (ping.ok !== true) {
+          setConnectionError(ping.error);
+          return;
+        }
+      }
+
+      onShopChange(s);
+      onAdminTokenChange(t);
+      localStorage.setItem("shopify_shop", s);
       if (onAfterSave) {
         const { serverSaved } = await onAfterSave(s, t);
         if (serverSaved) {
@@ -78,7 +93,10 @@ export function ShopifySettings({
             <Input
               placeholder="your-store.myshopify.com"
               value={shopValue}
-              onChange={(e) => setShopValue(e.target.value)}
+              onChange={(e) => {
+                setShopValue(e.target.value);
+                setConnectionError(null);
+              }}
               autoComplete="off"
             />
           </div>
@@ -88,14 +106,23 @@ export function ShopifySettings({
               type="password"
               placeholder="shpat_…"
               value={tokenValue}
-              onChange={(e) => setTokenValue(e.target.value)}
+              onChange={(e) => {
+                setTokenValue(e.target.value);
+                setConnectionError(null);
+              }}
               autoComplete="off"
             />
           </div>
           <p className="text-[11px] text-muted-foreground leading-snug">
-            Signed-in users can save the token to Supabase for server-side refunds. Until then, the token
-            stays in this browser (localStorage) for dev import enrichment via the Vite proxy.
+            Use the <span className="font-mono">*.myshopify.com</span> hostname only (not a full Admin API
+            URL). Signed-in users can save the token to Supabase for server-side refunds. Until then, the
+            token stays in this browser (localStorage) for dev import enrichment via the Vite proxy.
           </p>
+          {connectionError ? (
+            <p className="text-[11px] text-destructive leading-snug" role="alert">
+              {connectionError}
+            </p>
+          ) : null}
           <Button size="sm" onClick={() => void handleSave()} className="w-full" disabled={saving}>
             {saved ? (
               <>
@@ -103,7 +130,7 @@ export function ShopifySettings({
                 Saved
               </>
             ) : saving ? (
-              "Saving…"
+              "Verifying & saving…"
             ) : (
               "Save"
             )}

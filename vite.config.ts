@@ -1,7 +1,11 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import dns from "node:dns";
 import https from "node:https";
+
+/** WSL2 / some networks return flaky IPv6; Shopify Admin resolves reliably on IPv4. */
+dns.setDefaultResultOrder("ipv4first");
 
 function shopifyAdminProxy(): Plugin {
   return {
@@ -29,12 +33,29 @@ function shopifyAdminProxy(): Plugin {
           return;
         }
 
-        const shopHost = decodeURIComponent(rest.slice(0, slashIdx));
+        let shopHost: string;
+        try {
+          shopHost = decodeURIComponent(rest.slice(0, slashIdx)).trim();
+        } catch {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: "Invalid proxy path (bad encoding)" }));
+          return;
+        }
+        if (!shopHost) {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: "Missing shop hostname" }));
+          return;
+        }
+
         let shopPath = rest.slice(slashIdx);
         const q = rawUrl.includes("?") ? "?" + rawUrl.split("?").slice(1).join("?") : "";
         shopPath += q;
 
-        const opts: https.RequestOptions = {
+        // Prefer IPv4 for Shopify Admin. Do not use a custom `lookup`: Node 18+ may pass
+        // `all: true` (happy eyeballs); a naive dns.lookup callback shape yields "Invalid IP address: undefined".
+        const opts = {
           hostname: shopHost,
           path: shopPath,
           method: req.method || "GET",
@@ -42,7 +63,9 @@ function shopifyAdminProxy(): Plugin {
             "X-Shopify-Access-Token": token,
             Accept: "application/json",
           },
-        };
+          family: 4 as const,
+          autoSelectFamily: false,
+        } as https.RequestOptions;
 
         const proxyReq = https.request(opts, (proxyRes) => {
           res.statusCode = proxyRes.statusCode || 502;
@@ -60,7 +83,11 @@ function shopifyAdminProxy(): Plugin {
           if (!res.headersSent) {
             res.statusCode = 502;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ errors: err.message }));
+            const hint =
+              /ENOTFOUND/i.test(err.message) && shopHost.includes("myshopify.com")
+                ? " Node could not resolve the shop host. On WSL2, try fixing DNS (e.g. /etc/resolv.conf nameserver 8.8.8.8) or confirm the *.myshopify.com subdomain is correct."
+                : "";
+            res.end(JSON.stringify({ errors: `${err.message}${hint}` }));
           }
         });
 
