@@ -26,4 +26,7 @@ export interface Refund {
   shopifyFetchStatus?: ShopifyFetchStatus;
   shopifyProducts?: Product[];
   shopifyFetchError?: string;
+  shopifyRefundId?: string;
+  shopifyRefundError?: string;
+  shopifyRefundAttemptedAt?: string;
 }

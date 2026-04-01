@@ -59,6 +59,9 @@ export function rowToRefund(row: Tables<"refunds">): Refund {
     shopifyFetchStatus: fetchStatus,
     shopifyProducts: asProducts(row.shopify_products),
     shopifyFetchError: row.shopify_fetch_error ?? undefined,
+    shopifyRefundId: row.shopify_refund_id ?? undefined,
+    shopifyRefundError: row.shopify_refund_error ?? undefined,
+    shopifyRefundAttemptedAt: row.shopify_refund_attempted_at ?? undefined,
   };
 }
 
@@ -85,6 +88,9 @@ export function refundToInsert(r: Refund): RefundRow {
     shopify_fetch_status: r.shopifyFetchStatus ?? null,
     shopify_products: r.shopifyProducts ?? null,
     shopify_fetch_error: r.shopifyFetchError ?? null,
+    shopify_refund_id: r.shopifyRefundId ?? null,
+    shopify_refund_error: r.shopifyRefundError ?? null,
+    shopify_refund_attempted_at: r.shopifyRefundAttemptedAt ?? null,
   };
 }
 
@@ -119,6 +125,15 @@ function partialToUpdate(updates: Partial<Refund>): TablesUpdate<"refunds"> {
   }
   if (updates.shopifyFetchError !== undefined) {
     row.shopify_fetch_error = updates.shopifyFetchError ?? null;
+  }
+  if (updates.shopifyRefundId !== undefined) {
+    row.shopify_refund_id = updates.shopifyRefundId ?? null;
+  }
+  if (updates.shopifyRefundError !== undefined) {
+    row.shopify_refund_error = updates.shopifyRefundError ?? null;
+  }
+  if (updates.shopifyRefundAttemptedAt !== undefined) {
+    row.shopify_refund_attempted_at = updates.shopifyRefundAttemptedAt ?? null;
   }
   return row;
 }

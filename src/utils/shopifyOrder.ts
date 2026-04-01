@@ -1,13 +1,10 @@
 import type { Product } from "@/utils/refundCalculation";
+import {
+  normalizeShopDomain,
+  SHOPIFY_ADMIN_API_VERSION,
+} from "@/lib/shopifyAdminApi";
 
-const SHOPIFY_API_VERSION = "2024-10";
-
-export function normalizeShopDomain(shop: string): string {
-  return shop
-    .trim()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/$/, "");
-}
+const SHOPIFY_API_VERSION = SHOPIFY_ADMIN_API_VERSION;
 
 function buildOrderUrl(shopHost: string, numericOrderId: string): string {
   const path = `/admin/api/${SHOPIFY_API_VERSION}/orders/${numericOrderId}.json`;

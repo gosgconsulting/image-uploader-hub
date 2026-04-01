@@ -76,6 +76,30 @@ export type Database = {
         }
         Relationships: []
       }
+      shopify_credentials: {
+        Row: {
+          id: string
+          user_id: string
+          shop_domain: string
+          access_token: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          shop_domain: string
+          access_token: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          shop_domain?: string
+          access_token?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       refunds: {
         Row: {
           id: string
@@ -99,6 +123,9 @@ export type Database = {
           shopify_fetch_status: string | null
           shopify_products: Json | null
           shopify_fetch_error: string | null
+          shopify_refund_id: string | null
+          shopify_refund_error: string | null
+          shopify_refund_attempted_at: string | null
           created_at: string
           updated_at: string
         }
@@ -124,6 +151,9 @@ export type Database = {
           shopify_fetch_status?: string | null
           shopify_products?: Json | null
           shopify_fetch_error?: string | null
+          shopify_refund_id?: string | null
+          shopify_refund_error?: string | null
+          shopify_refund_attempted_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -149,6 +179,9 @@ export type Database = {
           shopify_fetch_status?: string | null
           shopify_products?: Json | null
           shopify_fetch_error?: string | null
+          shopify_refund_id?: string | null
+          shopify_refund_error?: string | null
+          shopify_refund_attempted_at?: string | null
           created_at?: string
           updated_at?: string
         }

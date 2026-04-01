@@ -14,6 +14,9 @@ import {
   insertRefunds,
   updateRefund,
 } from "@/lib/refund-db";
+import { fetchShopifyCredential, upsertShopifyCredential } from "@/lib/shopify-credentials";
+import { invokeProcessShopifyRefunds } from "@/lib/processShopifyRefunds";
+import { supabase } from "@/integrations/supabase/client";
 import { fetchShopifyOrderDetails } from "@/utils/shopifyOrder";
 
 export default function Refund() {
@@ -38,6 +41,65 @@ export default function Refund() {
   const [bulkRefundDialogOpen, setBulkRefundDialogOpen] = useState(false);
   const [isProcessingBulkRefund, setIsProcessingBulkRefund] = useState(false);
   const { toast } = useToast();
+
+  const hydrateShopifySession = useCallback(async () => {
+    const shop = localStorage.getItem("shopify_shop") || "";
+    setShopifyShop(shop);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session && shop) {
+      const row = await fetchShopifyCredential(shop);
+      setShopifyToken(
+        row?.access_token ?? localStorage.getItem("shopify_admin_token") ?? ""
+      );
+    } else {
+      setShopifyToken(localStorage.getItem("shopify_admin_token") ?? "");
+    }
+  }, []);
+
+  useEffect(() => {
+    void hydrateShopifySession();
+  }, [hydrateShopifySession]);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void hydrateShopifySession();
+    });
+    return () => subscription.unsubscribe();
+  }, [hydrateShopifySession]);
+
+  const handleShopifyAfterSave = useCallback(
+    async (shop: string, token: string) => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session && token.trim()) {
+        const { error } = await upsertShopifyCredential(shop, token);
+        if (!error) {
+          toast({
+            title: "Shopify credentials saved",
+            description: "Token stored in Supabase for server-side refunds.",
+          });
+          return { serverSaved: true };
+        }
+        toast({
+          title: "Could not save credentials",
+          description: error.message,
+          variant: "destructive",
+        });
+      } else if (!session && token.trim()) {
+        toast({
+          title: "Saved locally only",
+          description: "Sign in to store your Admin token for bulk Shopify refunds.",
+        });
+      }
+      return { serverSaved: false };
+    },
+    [toast]
+  );
 
   const loadRefunds = useCallback(async () => {
     setIsLoadingList(true);
@@ -188,57 +250,80 @@ export default function Refund() {
   const handleConfirmBulkRefund = useCallback(async () => {
     setIsProcessingBulkRefund(true);
 
-    const processableRefunds = selectedRefunds.filter((r) => r.status !== "failed");
-
-    for (const refund of processableRefunds) {
-      if (refund.status === "pending") {
-        setRefunds((prev) =>
-          prev.map((r) =>
-            r.id === refund.id ? { ...r, status: "processing" as const } : r
-          )
-        );
-        const { error: e1 } = await updateRefund(refund.id, { status: "processing" });
-        if (e1) {
-          toast({
-            title: "Bulk refund failed",
-            description: e1.message,
-            variant: "destructive",
-          });
-          setIsProcessingBulkRefund(false);
-          void loadRefunds();
-          return;
-        }
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      setRefunds((prev) =>
-        prev.map((r) =>
-          r.id === refund.id ? { ...r, status: "completed" as const } : r
-        )
-      );
-      const { error: e2 } = await updateRefund(refund.id, { status: "completed" });
-      if (e2) {
-        toast({
-          title: "Bulk refund failed",
-          description: e2.message,
-          variant: "destructive",
-        });
-        setIsProcessingBulkRefund(false);
-        void loadRefunds();
-        return;
-      }
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      toast({
+        title: "Sign in required",
+        description: "Bulk Shopify refunds need a signed-in user with credentials saved for this shop.",
+        variant: "destructive",
+      });
+      setIsProcessingBulkRefund(false);
+      return;
     }
+
+    const shop = shopifyShop.trim();
+    if (!shop) {
+      toast({
+        title: "Shop domain missing",
+        description: "Open Shopify API settings and save your shop domain.",
+        variant: "destructive",
+      });
+      setIsProcessingBulkRefund(false);
+      return;
+    }
+
+    const toProcess = selectedRefunds.filter((r) => !r.shopifyRefundId);
+    if (toProcess.length === 0) {
+      toast({
+        title: "Nothing to process",
+        description: "Selected rows already have a Shopify refund id.",
+      });
+      setIsProcessingBulkRefund(false);
+      setBulkRefundDialogOpen(false);
+      return;
+    }
+
+    const { data, error } = await invokeProcessShopifyRefunds(
+      shop,
+      toProcess.map((r) => r.id)
+    );
+
+    if (error) {
+      toast({
+        title: "Refund request failed",
+        description: error.message,
+        variant: "destructive",
+      });
+      setIsProcessingBulkRefund(false);
+      void loadRefunds();
+      return;
+    }
+
+    const results = data?.results ?? [];
+    const failed = results.filter((r) => !r.ok && !r.skipped);
+    const okCount = results.filter((r) => r.ok).length;
 
     setIsProcessingBulkRefund(false);
     setBulkRefundDialogOpen(false);
     setSelectedRefundIds(new Set());
+    void loadRefunds();
+
+    if (failed.length > 0) {
+      toast({
+        title: "Some refunds failed",
+        description: failed.map((f) => `${f.id}: ${f.error ?? "error"}`).join(" · "),
+        variant: "destructive",
+      });
+      return;
+    }
 
     toast({
-      title: "Bulk refund processed",
-      description: `Successfully processed ${processableRefunds.length} refund${processableRefunds.length === 1 ? "" : "s"}.`,
+      title: "Shopify refunds processed",
+      description: `Completed or skipped ${okCount} of ${results.length} request(s). Refresh the list if needed.`,
     });
-  }, [selectedRefunds, toast, loadRefunds]);
+  }, [selectedRefunds, shopifyShop, toast, loadRefunds]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -279,6 +364,7 @@ export default function Refund() {
               adminAccessToken={shopifyToken}
               onShopChange={setShopifyShop}
               onAdminTokenChange={setShopifyToken}
+              onAfterSave={handleShopifyAfterSave}
             />
           </div>
         </div>

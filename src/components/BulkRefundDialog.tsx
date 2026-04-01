@@ -48,7 +48,7 @@ export function BulkRefundDialog({
     return selectedRefunds.reduce((sum, refund) => sum + refund.calculatedRefund, 0);
   }, [selectedRefunds]);
 
-  const canProcess = selectedRefunds.every((r) => r.status !== "failed");
+  const canProcess = selectedRefunds.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -123,11 +123,10 @@ export function BulkRefundDialog({
             </span>
           </div>
 
-          {!canProcess && (
-            <div className="text-sm text-destructive font-mono">
-              Note: Some selected refunds have "failed" status and cannot be processed.
-            </div>
-          )}
+          <div className="text-[11px] text-muted-foreground font-mono leading-snug">
+            Rows that already have a Shopify refund id are skipped. Sign in and save your Admin token in
+            Shopify API settings before processing.
+          </div>
         </div>
 
         <DialogFooter>

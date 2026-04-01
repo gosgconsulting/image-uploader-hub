@@ -14,6 +14,8 @@ interface ShopifySettingsProps {
   adminAccessToken: string;
   onShopChange: (shop: string) => void;
   onAdminTokenChange: (token: string) => void;
+  /** After local state + shop localStorage; return whether token was stored in Supabase. */
+  onAfterSave?: (shop: string, token: string) => Promise<{ serverSaved: boolean }>;
 }
 
 export function ShopifySettings({
@@ -21,10 +23,12 @@ export function ShopifySettings({
   adminAccessToken,
   onShopChange,
   onAdminTokenChange,
+  onAfterSave,
 }: ShopifySettingsProps) {
   const [shopValue, setShopValue] = useState(shop);
   const [tokenValue, setTokenValue] = useState(adminAccessToken);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setShopValue(shop);
@@ -34,13 +38,29 @@ export function ShopifySettings({
     setTokenValue(adminAccessToken);
   }, [adminAccessToken]);
 
-  const handleSave = () => {
-    onShopChange(shopValue.trim());
-    onAdminTokenChange(tokenValue.trim());
-    localStorage.setItem("shopify_shop", shopValue.trim());
-    localStorage.setItem("shopify_admin_token", tokenValue.trim());
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const handleSave = async () => {
+    const s = shopValue.trim();
+    const t = tokenValue.trim();
+    onShopChange(s);
+    onAdminTokenChange(t);
+    localStorage.setItem("shopify_shop", s);
+    setSaving(true);
+    try {
+      if (onAfterSave) {
+        const { serverSaved } = await onAfterSave(s, t);
+        if (serverSaved) {
+          localStorage.removeItem("shopify_admin_token");
+        } else if (t) {
+          localStorage.setItem("shopify_admin_token", t);
+        }
+      } else {
+        if (t) localStorage.setItem("shopify_admin_token", t);
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -73,14 +93,17 @@ export function ShopifySettings({
             />
           </div>
           <p className="text-[11px] text-muted-foreground leading-snug">
-            Token stays in this browser (localStorage). In dev, requests go through the Vite proxy to avoid CORS.
+            Signed-in users can save the token to Supabase for server-side refunds. Until then, the token
+            stays in this browser (localStorage) for dev import enrichment via the Vite proxy.
           </p>
-          <Button size="sm" onClick={handleSave} className="w-full">
+          <Button size="sm" onClick={() => void handleSave()} className="w-full" disabled={saving}>
             {saved ? (
               <>
                 <Check className="h-3.5 w-3.5 mr-1.5" />
                 Saved
               </>
+            ) : saving ? (
+              "Saving…"
             ) : (
               "Save"
             )}
