@@ -12,7 +12,7 @@ export function isShopifyOAuthEnabled(): boolean {
 }
 
 export type ClaimShopifyInstallResult =
-  | { ok: true; shop_domain?: string }
+  | { ok: true; shop_domain?: string; credential_id?: string }
   | { ok: false; error: string };
 
 export type ClaimShopifyInstallInput = {
@@ -52,6 +52,7 @@ export async function claimShopifyInstall(
   const { data, error } = await supabase.functions.invoke<{
     ok?: boolean;
     shop_domain?: string;
+    credential_id?: string;
     error?: string;
   }>("shopify-oauth", {
     body,
@@ -62,7 +63,11 @@ export async function claimShopifyInstall(
     return { ok: false, error: error.message };
   }
   if (data?.ok) {
-    return { ok: true, shop_domain: data.shop_domain };
+    return {
+      ok: true,
+      shop_domain: data.shop_domain,
+      credential_id: data.credential_id,
+    };
   }
   return {
     ok: false,

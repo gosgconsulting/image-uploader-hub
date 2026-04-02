@@ -117,14 +117,18 @@ export async function handleClaim(req: Request, parsedBody?: unknown): Promise<R
     return json({ error: "Install link expired. Re-open the app from Shopify Admin." }, { status: 400 });
   }
 
-  const { error: upErr } = await admin.from("shopify_credentials").upsert(
-    {
-      user_id: user.id,
-      shop_domain: shopHost,
-      access_token: pending.access_token as string,
-    },
-    { onConflict: "user_id,shop_domain" }
-  );
+  const { data: credRow, error: upErr } = await admin
+    .from("shopify_credentials")
+    .upsert(
+      {
+        user_id: user.id,
+        shop_domain: shopHost,
+        access_token: pending.access_token as string,
+      },
+      { onConflict: "user_id,shop_domain" }
+    )
+    .select("id")
+    .single();
 
   if (upErr) {
     return json({ error: "Could not save credentials" }, { status: 500 });
@@ -132,5 +136,9 @@ export async function handleClaim(req: Request, parsedBody?: unknown): Promise<R
 
   await admin.from("shopify_oauth_pending").delete().eq("shop_domain", shopHost);
 
-  return json({ ok: true, shop_domain: shopHost });
+  return json({
+    ok: true,
+    shop_domain: shopHost,
+    credential_id: credRow?.id ? String(credRow.id) : undefined,
+  });
 }

@@ -139,14 +139,18 @@ export async function handleCallback(req: Request): Promise<Response> {
   }
 
   if (userId) {
-    const { error: upErr } = await admin.from("shopify_credentials").upsert(
-      {
-        user_id: userId,
-        shop_domain: shopHost,
-        access_token: tokenJson.access_token,
-      },
-      { onConflict: "user_id,shop_domain" }
-    );
+    const { data: credRow, error: upErr } = await admin
+      .from("shopify_credentials")
+      .upsert(
+        {
+          user_id: userId,
+          shop_domain: shopHost,
+          access_token: tokenJson.access_token,
+        },
+        { onConflict: "user_id,shop_domain" }
+      )
+      .select("id")
+      .single();
 
     if (upErr) {
       return redirect(returnUrl, {
@@ -154,6 +158,15 @@ export async function handleCallback(req: Request): Promise<Response> {
         reason: "Could not save credentials",
       });
     }
+
+    const signedInParams: Record<string, string> = {
+      shopify_oauth: "success",
+      shop: shopHost,
+    };
+    if (credRow?.id) {
+      signedInParams.shopify_connection_id = String(credRow.id);
+    }
+    return redirect(returnUrl, signedInParams);
   } else {
     const pendingExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const claimNonce = crypto.randomUUID();
@@ -180,9 +193,4 @@ export async function handleCallback(req: Request): Promise<Response> {
       shopify_claim: claimNonce,
     });
   }
-
-  return redirect(returnUrl, {
-    shopify_oauth: "success",
-    shop: shopHost,
-  });
 }

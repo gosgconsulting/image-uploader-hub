@@ -36,7 +36,7 @@ export function hasShopifyAdminCredentials(shop: string, adminAccessToken: strin
 
 export async function fetchShopifyCredential(
   shopDomain: string
-): Promise<{ access_token: string } | null> {
+): Promise<{ access_token: string; id: string } | null> {
   if (!shouldLoadShopifyCredentialsFromSupabase()) return null;
 
   const domain = normalizeShopDomain(shopDomain);
@@ -44,20 +44,20 @@ export async function fetchShopifyCredential(
 
   const { data, error } = await supabase
     .from("shopify_credentials")
-    .select("access_token")
+    .select("id, access_token")
     .eq("shop_domain", domain)
     .maybeSingle();
 
-  if (error || !data?.access_token) return null;
-  return { access_token: data.access_token };
+  if (error || !data?.access_token || !data.id) return null;
+  return { access_token: data.access_token, id: data.id };
 }
 
 export async function upsertShopifyCredential(
   shopDomain: string,
   accessToken: string
-): Promise<{ error: Error | null }> {
+): Promise<{ error: Error | null; credentialId?: string }> {
   if (!isShopifyCredentialsSupabasePersistenceEnabled()) {
-    return { error: null };
+    return { error: null, credentialId: undefined };
   }
 
   const domain = normalizeShopDomain(shopDomain);
@@ -74,14 +74,21 @@ export async function upsertShopifyCredential(
     return { error: new Error("You must be signed in to save Shopify credentials") };
   }
 
-  const { error } = await supabase.from("shopify_credentials").upsert(
-    {
-      user_id: session.user.id,
-      shop_domain: domain,
-      access_token: accessToken.trim(),
-    },
-    { onConflict: "user_id,shop_domain" }
-  );
+  const { data, error } = await supabase
+    .from("shopify_credentials")
+    .upsert(
+      {
+        user_id: session.user.id,
+        shop_domain: domain,
+        access_token: accessToken.trim(),
+      },
+      { onConflict: "user_id,shop_domain" }
+    )
+    .select("id")
+    .single();
 
-  return { error: error ? new Error(error.message) : null };
+  return {
+    error: error ? new Error(error.message) : null,
+    credentialId: data?.id ? String(data.id) : undefined,
+  };
 }

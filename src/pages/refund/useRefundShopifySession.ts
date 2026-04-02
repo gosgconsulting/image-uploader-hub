@@ -13,6 +13,7 @@ import { claimShopifyInstall } from "@/lib/shopifyOAuth";
 import { useShopifyLiveConnectionTest } from "@/hooks/useShopifyLiveConnectionTest";
 import { useRefundShopifyOAuthReturnParams } from "@/pages/refund/useRefundShopifyOAuthReturnParams";
 import {
+  LS_SHOPIFY_CONNECTION_ID,
   SS_SHOPIFY_CLAIM_NONCE,
   SS_SHOPIFY_CLAIM_SHOP,
 } from "@/pages/refund/shopifyRefundSessionKeys";
@@ -24,6 +25,9 @@ export function useRefundShopifySession() {
   );
   const [shopifyToken, setShopifyToken] = useState(
     () => localStorage.getItem("shopify_admin_token") || ""
+  );
+  const [shopifyConnectionId, setShopifyConnectionId] = useState(
+    () => localStorage.getItem(LS_SHOPIFY_CONNECTION_ID) || ""
   );
   const { toast } = useToast();
 
@@ -37,6 +41,11 @@ export function useRefundShopifySession() {
       data: { session },
     } = await supabase.auth.getSession();
 
+    if (!session) {
+      localStorage.removeItem(LS_SHOPIFY_CONNECTION_ID);
+      setShopifyConnectionId("");
+    }
+
     const pendingNonce = sessionStorage.getItem(SS_SHOPIFY_CLAIM_NONCE);
     if (session && pendingNonce) {
       const claim = await claimShopifyInstall({ claimNonce: pendingNonce });
@@ -46,6 +55,10 @@ export function useRefundShopifySession() {
         if (claim.shop_domain) {
           localStorage.setItem("shopify_shop", claim.shop_domain);
           setShopifyShop(claim.shop_domain);
+        }
+        if (claim.credential_id) {
+          localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, claim.credential_id);
+          setShopifyConnectionId(claim.credential_id);
         }
         toast({
           title: "Shopify linked",
@@ -62,6 +75,10 @@ export function useRefundShopifySession() {
             localStorage.setItem("shopify_shop", claim.shop_domain);
             setShopifyShop(claim.shop_domain);
           }
+          if (claim.credential_id) {
+            localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, claim.credential_id);
+            setShopifyConnectionId(claim.credential_id);
+          }
           toast({
             title: "Shopify linked",
             description: "Your Admin install is now tied to this account for server-side refunds.",
@@ -77,17 +94,29 @@ export function useRefundShopifySession() {
       setShopifyToken(
         row?.access_token ?? localStorage.getItem("shopify_admin_token") ?? ""
       );
+      if (row?.id) {
+        localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, row.id);
+        setShopifyConnectionId(row.id);
+      } else {
+        localStorage.removeItem(LS_SHOPIFY_CONNECTION_ID);
+        setShopifyConnectionId("");
+      }
     } else {
       setShopifyToken(localStorage.getItem("shopify_admin_token") ?? "");
+      if (session && !shopAfter) {
+        localStorage.removeItem(LS_SHOPIFY_CONNECTION_ID);
+        setShopifyConnectionId("");
+      }
     }
-  }, [toast]);
+  }, [toast, setShopifyConnectionId]);
 
   useRefundShopifyOAuthReturnParams(
     searchParams,
     setSearchParams,
     toast,
     hydrateShopifySession,
-    setShopifyShop
+    setShopifyShop,
+    setShopifyConnectionId
   );
 
   useEffect(() => {
@@ -129,8 +158,12 @@ export function useRefundShopifySession() {
           });
           return { serverSaved: false };
         }
-        const { error } = await upsertShopifyCredential(shop, token);
+        const { error, credentialId } = await upsertShopifyCredential(shop, token);
         if (!error) {
+          if (credentialId) {
+            localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, credentialId);
+            setShopifyConnectionId(credentialId);
+          }
           toast({
             title: "Shopify credentials saved",
             description: "Token stored in Supabase for server-side refunds.",
@@ -150,7 +183,7 @@ export function useRefundShopifySession() {
       }
       return { serverSaved: false };
     },
-    [toast]
+    [toast, setShopifyConnectionId]
   );
 
   const shopifyEmbeddedContextActive =
@@ -161,6 +194,7 @@ export function useRefundShopifySession() {
     setShopifyShop,
     shopifyToken,
     setShopifyToken,
+    shopifyConnectionId,
     handleShopifyAfterSave,
     shopifyEmbeddedContextActive,
     shopifyLiveConnectionStatus,

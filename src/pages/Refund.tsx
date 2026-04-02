@@ -21,6 +21,7 @@ export default function Refund() {
     setShopifyShop,
     shopifyToken,
     setShopifyToken,
+    shopifyConnectionId,
     handleShopifyAfterSave,
     shopifyEmbeddedContextActive,
     shopifyLiveConnectionStatus,
@@ -110,7 +111,11 @@ export default function Refund() {
                 <Badge
                   variant="outline"
                   className="font-mono text-xs max-w-[min(280px,40vw)] truncate"
-                  title={shopifyShop}
+                  title={
+                    shopifyConnectionId
+                      ? `${shopifyShop} · connection ${shopifyConnectionId}`
+                      : shopifyShop || undefined
+                  }
                 >
                   {shopifyShop || "Store"}
                 </Badge>
