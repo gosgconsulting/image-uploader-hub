@@ -1,5 +1,5 @@
 ---
-description: Core engineering principles, file limits, validation, errors, and PLAN-ACT-REFLECT workflow
+description: Core engineering principles, React patterns, file limits, validation, errors, and PLAN-ACT-REFLECT workflow
 alwaysApply: true
 ---
 
@@ -7,7 +7,13 @@ alwaysApply: true
 
 - **Architect first:** Do not implement non-trivial changes without a plan. Before coding, read `architecture.md` (repo root or documented location). If it is missing, say so once and proceed from README/TODO or ask where architecture lives.
 - **Atomic modules:** Keep files under **250 lines**. If a file exceeds that, refactor into sub-modules in the same feature area; do not grow monoliths.
-- **Functional style:** Prefer pure functions and immutability where it fits the existing codebase.
+- **Functional style:** Prefer pure functions and immutability where it fits the existing codebase. In React, favor **function components** and hooks over class components; derive state with `useMemo` / `useCallback` only when profiling or correctness demands it—avoid premature optimization.
+- **React best practices (UI work):**
+  - **Hooks:** Encapsulate stateful logic in custom hooks (`useThing`) with stable, intention-revealing names; keep hooks at the top level and follow the rules of hooks.
+  - **Context:** Use **React Context** (plus a small provider + optional custom hook) for cross-cutting or tree-wide data (theme, auth session, feature flags) instead of prop drilling; split contexts by concern so consumers don’t re-render on unrelated updates.
+  - **Reusability:** Prefer **composable, reusable** pieces—shared hooks, presentational components, and typed utilities—over copy-paste. Extract when the same pattern appears twice with a clear abstraction; don’t over-abstract one-offs.
+  - **Boundaries:** Prefer small, focused components; colocate feature logic with pages/routes and lift shared logic into hooks. On **Next.js App Router**, default to Server Components and add `'use client'` only where interactivity or browser APIs are required, pushing that boundary as deep as possible.
+  - **Quality:** Accessible markup (semantic HTML, labels, focus), predictable effects (`useEffect` with correct deps, cleanup), and TypeScript for props and hook return shapes.
 - **Validation:** Validate external and user-facing inputs with **Zod** (or the project’s existing equivalent if already chosen—stay consistent).
 - **Error handling:** No silent failures. Prefer **typed error results** (e.g. `Result` / discriminated unions) for expected control flow; use exceptions only for truly exceptional paths. Log or surface errors appropriately.
 
