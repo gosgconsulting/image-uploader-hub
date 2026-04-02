@@ -4,7 +4,7 @@ import { normalizeShopDomain, pickParentAndRefundAmount } from "./refundLogic.ts
 import { formatShopifyError, normalizeTransactions, shopifyJson } from "./shopifyHttp.ts";
 import { resolveRefundAccessToken } from "./resolveRefundAccessToken.ts";
 
-const SHOPIFY_API_VERSION = "2024-10";
+const SHOPIFY_API_VERSION = "2026-04";
 const MAX_BATCH = 40;
 
 const cors = {

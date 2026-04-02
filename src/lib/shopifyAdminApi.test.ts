@@ -13,7 +13,7 @@ describe("normalizeShopDomain", () => {
   it("drops pasted Admin API path and query so DNS is not given a bogus host", () => {
     expect(
       normalizeShopDomain(
-        "0bfrtk-ht.myshopify.com/admin/api/2026-01/products.json?collection_id=527164440852"
+        "0bfrtk-ht.myshopify.com/admin/api/2026-04/products.json?collection_id=527164440852"
       )
     ).toBe("0bfrtk-ht.myshopify.com");
   });

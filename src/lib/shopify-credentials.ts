@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
+import { isShopifyOAuthEnabled } from "@/lib/shopifyOAuth";
 
 /** Opt-in: default false when unset (missing Vite env key). */
 export function parseSaveShopifyCredentialsEnv(raw: string | undefined): boolean {
@@ -16,6 +17,13 @@ export function isShopifyCredentialsSupabasePersistenceEnabled(): boolean {
   return parseSaveShopifyCredentialsEnv(import.meta.env.VITE_SAVE_SHOPIFY_CREDENTIALS);
 }
 
+/** Read tokens written by OAuth claim or manual save (RLS: own rows only). */
+function shouldLoadShopifyCredentialsFromSupabase(): boolean {
+  return (
+    isShopifyCredentialsSupabasePersistenceEnabled() || isShopifyOAuthEnabled()
+  );
+}
+
 /**
  * True when we have a *.myshopify.com hostname and a non-empty Admin token (from Supabase hydrate or localStorage).
  * Does not verify the token with Shopify — only that credentials are present for this session.
@@ -29,7 +37,7 @@ export function hasShopifyAdminCredentials(shop: string, adminAccessToken: strin
 export async function fetchShopifyCredential(
   shopDomain: string
 ): Promise<{ access_token: string } | null> {
-  if (!isShopifyCredentialsSupabasePersistenceEnabled()) return null;
+  if (!shouldLoadShopifyCredentialsFromSupabase()) return null;
 
   const domain = normalizeShopDomain(shopDomain);
   if (!domain) return null;
