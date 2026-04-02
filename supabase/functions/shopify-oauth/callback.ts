@@ -119,26 +119,45 @@ export async function handleCallback(req: Request): Promise<Response> {
     });
   }
 
-  const userId = row.user_id as string;
+  const userId = row.user_id as string | null;
   await admin.from("shopify_oauth_states").update({ consumed_at: new Date().toISOString() }).eq(
     "state",
     state
   );
 
-  const { error: upErr } = await admin.from("shopify_credentials").upsert(
-    {
-      user_id: userId,
-      shop_domain: shopHost,
-      access_token: tokenJson.access_token,
-    },
-    { onConflict: "user_id,shop_domain" }
-  );
+  if (userId) {
+    const { error: upErr } = await admin.from("shopify_credentials").upsert(
+      {
+        user_id: userId,
+        shop_domain: shopHost,
+        access_token: tokenJson.access_token,
+      },
+      { onConflict: "user_id,shop_domain" }
+    );
 
-  if (upErr) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "Could not save credentials",
-    });
+    if (upErr) {
+      return redirect(returnUrl, {
+        shopify_oauth: "error",
+        reason: "Could not save credentials",
+      });
+    }
+  } else {
+    const pendingExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { error: pendErr } = await admin.from("shopify_oauth_pending").upsert(
+      {
+        shop_domain: shopHost,
+        access_token: tokenJson.access_token,
+        expires_at: pendingExpires,
+      },
+      { onConflict: "shop_domain" }
+    );
+
+    if (pendErr) {
+      return redirect(returnUrl, {
+        shopify_oauth: "error",
+        reason: "Could not store install token",
+      });
+    }
   }
 
   return redirect(returnUrl, {

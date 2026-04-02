@@ -8,17 +8,12 @@ import { BulkRefundDialog } from "@/components/BulkRefundDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useToast } from "@/hooks/use-toast";
-import { isShopifyCredentialsSupabasePersistenceEnabled } from "@/lib/shopify-credentials";
-import { isShopifyOAuthEnabled, startShopifyOAuth } from "@/lib/shopifyOAuth";
 import { useRefundShopifySession } from "@/pages/refund/useRefundShopifySession";
 import { useRefundRecords } from "@/pages/refund/useRefundRecords";
 import { useRefundBulkSelection } from "@/pages/refund/useRefundBulkSelection";
 
 export default function Refund() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [embeddedOAuthBusy, setEmbeddedOAuthBusy] = useState(false);
-  const { toast } = useToast();
   const {
     shopifyShop,
     setShopifyShop,
@@ -28,11 +23,8 @@ export default function Refund() {
     shopifyEmbeddedContextActive,
   } = useRefundShopifySession();
 
-  const canConnectShopifyApp =
-    isShopifyOAuthEnabled() && isShopifyCredentialsSupabasePersistenceEnabled();
   const needsManualShopifySettings =
-    !shopifyEmbeddedContextActive ||
-    (!shopifyToken.trim() && !canConnectShopifyApp);
+    !shopifyEmbeddedContextActive || !shopifyToken.trim();
 
   const {
     loadError,
@@ -114,30 +106,6 @@ export default function Refund() {
                 >
                   {shopifyShop || "Store"}
                 </Badge>
-                {!shopifyToken.trim() ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    disabled={embeddedOAuthBusy || !shopifyShop.trim()}
-                    onClick={() => {
-                      void (async () => {
-                        setEmbeddedOAuthBusy(true);
-                        const r = await startShopifyOAuth(shopifyShop);
-                        setEmbeddedOAuthBusy(false);
-                        if (r.ok === false) {
-                          toast({
-                            title: "Could not start OAuth",
-                            description: r.error,
-                            variant: "destructive",
-                          });
-                        }
-                      })();
-                    }}
-                  >
-                    {embeddedOAuthBusy ? "Redirecting…" : "Connect Shopify"}
-                  </Button>
-                ) : null}
               </div>
             )}
           </div>

@@ -26,16 +26,18 @@ Ensure your Supabase project URL and anon key are configured in your environment
 
 ## Shopify app (OAuth) for Refund
 
-Use a **Shopify custom or public app** in the Partner Dashboard (or dev store custom app) with redirect URL:
+Use a **Shopify custom or public app** in the Partner Dashboard (or dev store custom app).
 
-`https://<project-ref>.supabase.co/functions/v1/shopify-oauth`
+- **Allowed redirection URL(s)** (OAuth callback):  
+  `https://<project-ref>.supabase.co/functions/v1/shopify-oauth`
+- **App URL** (where Shopify sends merchants after **Install**): **the same** function URL above, so the install request (`?shop=&timestamp=&hmac=`) hits the Edge Function and starts OAuth.
 
 Match the default scopes or set `SHOPIFY_OAUTH_SCOPES` on the function: `read_orders`, `write_orders`.
 
-1. Apply migrations (includes `shopify_oauth_states`).
+1. Apply migrations (includes `shopify_oauth_states`, `shopify_oauth_pending`).
 2. Set Edge Function secrets: `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_OAUTH_RETURN_URL` (full URL to the Refund page, e.g. `https://your-domain/refund` or `http://localhost:5173/refund` for local dev).
 3. Deploy: `supabase functions deploy shopify-oauth`
-4. Frontend: `VITE_SAVE_SHOPIFY_CREDENTIALS=true` and `VITE_SHOPIFY_OAUTH_ENABLED=true`, signed-in user, then **Shopify API → Connect with Shopify app**.
+4. Frontend: `VITE_SAVE_SHOPIFY_CREDENTIALS=true` and `VITE_SHOPIFY_OAUTH_ENABLED=true`. Merchants **install from Shopify Admin**; after redirect back to Refund, **sign in** on this app so the token is claimed into `shopify_credentials` (instructions also appear under **Shopify API** in the UI).
 
 ## Testing
 

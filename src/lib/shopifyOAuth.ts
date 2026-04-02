@@ -11,28 +11,28 @@ export function isShopifyOAuthEnabled(): boolean {
   return parseShopifyOAuthEnabledEnv(import.meta.env.VITE_SHOPIFY_OAUTH_ENABLED);
 }
 
-export type StartShopifyOAuthResult =
+export type ClaimShopifyInstallResult =
   | { ok: true }
   | { ok: false; error: string };
 
 /**
- * Starts Shopify OAuth (browser redirect). Requires signed-in Supabase user.
+ * Moves a token from shopify_oauth_pending (after Admin install OAuth) into shopify_credentials for the current user.
  */
-export async function startShopifyOAuth(shop: string): Promise<StartShopifyOAuthResult> {
+export async function claimShopifyInstall(shop: string): Promise<ClaimShopifyInstallResult> {
   const domain = normalizeShopDomain(shop.trim());
   if (!domain) {
-    return { ok: false, error: "Enter a valid *.myshopify.com shop domain." };
+    return { ok: false, error: "Invalid shop domain." };
   }
 
   const {
     data: { session },
   } = await supabase.auth.getSession();
   if (!session?.access_token) {
-    return { ok: false, error: "Sign in to connect Shopify." };
+    return { ok: false, error: "Sign in to link this shop." };
   }
 
   const { data, error } = await supabase.functions.invoke<{
-    redirectUrl?: string;
+    ok?: boolean;
     error?: string;
   }>("shopify-oauth", {
     body: { shop: domain },
@@ -42,13 +42,11 @@ export async function startShopifyOAuth(shop: string): Promise<StartShopifyOAuth
   if (error) {
     return { ok: false, error: error.message };
   }
-  if (!data?.redirectUrl) {
-    return {
-      ok: false,
-      error: data?.error || "Could not start Shopify OAuth.",
-    };
+  if (data?.ok) {
+    return { ok: true };
   }
-
-  window.location.assign(data.redirectUrl);
-  return { ok: true };
+  return {
+    ok: false,
+    error: data?.error || "Could not link shop.",
+  };
 }

@@ -9,6 +9,7 @@ import {
 import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
 import { shopDomainFromEmbeddedAppSearch } from "@/lib/shopifyEmbeddedContext";
 import { supabase } from "@/integrations/supabase/client";
+import { claimShopifyInstall } from "@/lib/shopifyOAuth";
 
 export function useRefundShopifySession() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -26,6 +27,19 @@ export function useRefundShopifySession() {
     const {
       data: { session },
     } = await supabase.auth.getSession();
+
+    const pendingClaim = sessionStorage.getItem("shopify_pending_claim_shop");
+    if (session && pendingClaim) {
+      const claim = await claimShopifyInstall(pendingClaim);
+      if (claim.ok) {
+        sessionStorage.removeItem("shopify_pending_claim_shop");
+        toast({
+          title: "Shopify linked",
+          description: "Your Admin install is now tied to this account for server-side refunds.",
+        });
+      }
+    }
+
     if (session && shop) {
       const row = await fetchShopifyCredential(shop);
       setShopifyToken(
@@ -34,7 +48,7 @@ export function useRefundShopifySession() {
     } else {
       setShopifyToken(localStorage.getItem("shopify_admin_token") ?? "");
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     void hydrateShopifySession();
@@ -74,10 +88,41 @@ export function useRefundShopifySession() {
         setShopifyShop(normalized);
         localStorage.setItem("shopify_shop", normalized);
       }
-      toast({
-        title: "Shopify connected",
-        description: "OAuth completed. Credentials are stored for server-side refunds and sync.",
-      });
+
+      void (async () => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session && normalized) {
+          const claim = await claimShopifyInstall(normalized);
+          if (!claim.ok) {
+            toast({
+              title: "Finish linking",
+              description: "error" in claim ? claim.error : "Unknown error",
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Shopify linked",
+              description:
+                "Install finished. This shop is tied to your account for server-side refunds.",
+            });
+          }
+        } else if (normalized) {
+          sessionStorage.setItem("shopify_pending_claim_shop", normalized);
+          toast({
+            title: "Almost done",
+            description:
+              "Sign in on this site with the same browser. Your shop will link automatically for refunds.",
+          });
+        } else {
+          toast({
+            title: "Shopify install completed",
+            description: "Could not read shop from redirect; set the shop domain in settings if needed.",
+          });
+        }
+        void hydrateShopifySession();
+      })();
     } else if (o === "error") {
       toast({
         title: "Shopify connection failed",
@@ -91,7 +136,9 @@ export function useRefundShopifySession() {
     next.delete("shop");
     next.delete("reason");
     setSearchParams(next, { replace: true });
-    void hydrateShopifySession();
+    if (o !== "success") {
+      void hydrateShopifySession();
+    }
   }, [searchParams, setSearchParams, toast, hydrateShopifySession]);
 
   const handleShopifyAfterSave = useCallback(
