@@ -7,6 +7,7 @@ import {
   upsertShopifyCredential,
 } from "@/lib/shopify-credentials";
 import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
+import { shopDomainFromEmbeddedAppSearch } from "@/lib/shopifyEmbeddedContext";
 import { supabase } from "@/integrations/supabase/client";
 
 export function useRefundShopifySession() {
@@ -47,6 +48,18 @@ export function useRefundShopifySession() {
     });
     return () => subscription.unsubscribe();
   }, [hydrateShopifySession]);
+
+  useEffect(() => {
+    const fromEmbed = shopDomainFromEmbeddedAppSearch(searchParams);
+    if (!fromEmbed) return;
+
+    const stored = localStorage.getItem("shopify_shop") || "";
+    if (stored !== fromEmbed) {
+      localStorage.setItem("shopify_shop", fromEmbed);
+      setShopifyShop(fromEmbed);
+    }
+    void hydrateShopifySession();
+  }, [searchParams, hydrateShopifySession]);
 
   useEffect(() => {
     const o = searchParams.get("shopify_oauth");
@@ -119,11 +132,15 @@ export function useRefundShopifySession() {
     [toast]
   );
 
+  const shopifyEmbeddedContextActive =
+    shopDomainFromEmbeddedAppSearch(searchParams) !== null;
+
   return {
     shopifyShop,
     setShopifyShop,
     shopifyToken,
     setShopifyToken,
     handleShopifyAfterSave,
+    shopifyEmbeddedContextActive,
   };
 }
