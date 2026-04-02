@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { RefundImportSheetPicker } from "@/components/RefundImportSheetPicker";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Refund } from "@/types/refund";
@@ -16,15 +17,12 @@ import {
   parseRefundSpreadsheetBuffer,
   groupsToRefundRows,
 } from "@/utils/parseRefundSpreadsheet";
+import { useRefundImportWorkbook } from "@/pages/refund/useRefundImportWorkbook";
 
 interface RefundImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onImported: (rows: Refund[]) => void | Promise<void>;
-}
-
-function storageSafeFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200) || "document.pdf";
 }
 
 const ACCEPT_SHEET =
@@ -46,7 +44,6 @@ function isSpreadsheetFile(file: File): boolean {
 function isPdfFile(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
-
 export function RefundImportDialog({
   open,
   onOpenChange,
@@ -56,6 +53,15 @@ export function RefundImportDialog({
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
+  const {
+    meta,
+    scanning,
+    pivotSet,
+    selectedSheetNames,
+    toggleSheet,
+    namesToImport,
+    showSheetPicker,
+  } = useRefundImportWorkbook(sheetFile);
 
   const reset = useCallback(() => {
     setSheetFile(null);
@@ -79,14 +85,26 @@ export function RefundImportDialog({
       });
       return;
     }
+    if (namesToImport.length === 0) {
+      toast({
+        title: "Select at least one tab",
+        description: "Choose which worksheet(s) to import.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setBusy(true);
     try {
       const buffer = await sheetFile.arrayBuffer();
-      const groups = parseRefundSpreadsheetBuffer(buffer);
+      const groups = parseRefundSpreadsheetBuffer(buffer, {
+        sheetNames: namesToImport,
+      });
       let pdfUrl: string | undefined;
       if (pdfFile) {
-        const path = `${crypto.randomUUID()}-${storageSafeFileName(pdfFile.name)}`;
+        const safe =
+          pdfFile.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200) || "document.pdf";
+        const path = `${crypto.randomUUID()}-${safe}`;
         const { error: uploadError } = await supabase.storage
           .from("refund-pdfs")
           .upload(path, pdfFile, {
@@ -117,6 +135,9 @@ export function RefundImportDialog({
       setBusy(false);
     }
   };
+
+  const importDisabled =
+    busy || !sheetFile || scanning || namesToImport.length === 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -151,7 +172,23 @@ export function RefundImportDialog({
             {sheetFile && (
               <p className="text-xs text-muted-foreground font-mono">{sheetFile.name}</p>
             )}
+            {scanning && (
+              <p className="text-xs text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
+                Reading tabs…
+              </p>
+            )}
           </div>
+
+          {showSheetPicker && meta && (
+            <RefundImportSheetPicker
+              meta={meta}
+              pivotSet={pivotSet}
+              selectedSheetNames={selectedSheetNames}
+              toggleSheet={toggleSheet}
+              disabled={busy}
+            />
+          )}
 
           <div className="space-y-2">
             <Label className="font-mono text-xs uppercase tracking-wider flex items-center gap-2">
@@ -181,12 +218,11 @@ export function RefundImportDialog({
           </div>
 
           <p className="text-xs text-muted-foreground leading-relaxed">
-            Rows are grouped by the <span className="font-mono">page</span> column (one table row per
-            page). Columns: <span className="font-mono">numero_commande</span>,{" "}
-            <span className="font-mono">provenance</span>, <span className="font-mono">date</span>,{" "}
-            <span className="font-mono">nom_produit</span>,{" "}
-            <span className="font-mono">raison_retour</span>,{" "}
-            <span className="font-mono">lien_shopify</span>.
+            Pick tabs when there are several; pivot sheets are disabled. Multiple tabs merge;{" "}
+            <span className="font-mono">page</span> is prefixed by tab. Columns:{" "}
+            <span className="font-mono">numero_commande</span>, <span className="font-mono">provenance</span>,{" "}
+            <span className="font-mono">date</span>, <span className="font-mono">nom_produit</span>,{" "}
+            <span className="font-mono">raison_retour</span>, <span className="font-mono">lien_shopify</span>.
           </p>
         </div>
 
@@ -194,7 +230,7 @@ export function RefundImportDialog({
           <Button variant="outline" onClick={() => handleClose(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={busy || !sheetFile}>
+          <Button onClick={handleSubmit} disabled={importDisabled}>
             {busy ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
