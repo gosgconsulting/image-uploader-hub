@@ -9,7 +9,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
 import { isShopifyCredentialsSupabasePersistenceEnabled } from "@/lib/shopify-credentials";
+import { isShopifyOAuthEnabled, startShopifyOAuth } from "@/lib/shopifyOAuth";
 
 interface ShopifySettingsProps {
   shop: string;
@@ -27,11 +29,15 @@ export function ShopifySettings({
   onAdminTokenChange,
   onAfterSave,
 }: ShopifySettingsProps) {
+  const { toast } = useToast();
   const [shopValue, setShopValue] = useState(shop);
   const [tokenValue, setTokenValue] = useState(adminAccessToken);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const showOAuthConnect =
+    isShopifyOAuthEnabled() && isShopifyCredentialsSupabasePersistenceEnabled();
 
   useEffect(() => {
     setShopValue(shop);
@@ -129,6 +135,37 @@ export function ShopifySettings({
               </>
             )}
           </p>
+          {showOAuthConnect ? (
+            <div className="space-y-2 rounded-md border border-border/80 bg-muted/30 p-2.5">
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Prefer the Shopify app: sign in here, enter the shop domain, then authorize. Your Admin API
+                token is stored in Supabase (same as manual paste).
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full"
+                disabled={oauthBusy}
+                onClick={() => {
+                  void (async () => {
+                    setOauthBusy(true);
+                    const r = await startShopifyOAuth(shopValue);
+                    setOauthBusy(false);
+                    if (!r.ok) {
+                      toast({
+                        title: "Could not start OAuth",
+                        description: r.error,
+                        variant: "destructive",
+                      });
+                    }
+                  })();
+                }}
+              >
+                {oauthBusy ? "Redirecting…" : "Connect with Shopify app"}
+              </Button>
+            </div>
+          ) : null}
           {connectionError ? (
             <p className="text-[11px] text-destructive leading-snug" role="alert">
               {connectionError}

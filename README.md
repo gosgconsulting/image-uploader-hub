@@ -24,6 +24,19 @@ The Supabase client is initialized at:
 
 Ensure your Supabase project URL and anon key are configured in your environment (.env) if needed.
 
+## Shopify app (OAuth) for Refund
+
+Use a **Shopify custom or public app** in the Partner Dashboard (or dev store custom app) with redirect URL:
+
+`https://<project-ref>.supabase.co/functions/v1/shopify-oauth`
+
+Match the default scopes or set `SHOPIFY_OAUTH_SCOPES` on the function: `read_orders`, `write_orders`.
+
+1. Apply migrations (includes `shopify_oauth_states`).
+2. Set Edge Function secrets: `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_OAUTH_RETURN_URL` (full URL to the Refund page, e.g. `https://your-domain/refund` or `http://localhost:5173/refund` for local dev).
+3. Deploy: `supabase functions deploy shopify-oauth`
+4. Frontend: `VITE_SAVE_SHOPIFY_CREDENTIALS=true` and `VITE_SHOPIFY_OAUTH_ENABLED=true`, signed-in user, then **Shopify API → Connect with Shopify app**.
+
 ## Testing
 
 - Run all tests: npm run test

@@ -39,6 +39,7 @@ Configure the Shopify custom app with at least:
 ### Credentials (`shopify_credentials`)
 
 - **Client toggle**: Set `VITE_SAVE_SHOPIFY_CREDENTIALS=true` in the Vite env to persist Admin tokens in `shopify_credentials` for server-side refunds. Default (unset) is browser-only (localStorage).
+- **Shopify app (OAuth)**: With `VITE_SHOPIFY_OAUTH_ENABLED=true` and Supabase credential saving on, the Refund UI offers **Connect with Shopify app**. Flow: signed-in user → Edge Function `shopify-oauth` (POST, JWT) issues authorize URL → merchant approves → Shopify GET callback → HMAC + `shopify_oauth_states` validation → token exchange → `shopify_credentials` upsert → browser redirect to `SHOPIFY_OAUTH_RETURN_URL` (e.g. `https://your-host/refund`) with `?shopify_oauth=success&shop=…`. Partner app redirect URL must match `{SUPABASE_URL}/functions/v1/shopify-oauth` exactly. Edge secrets: `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_OAUTH_RETURN_URL`; optional `SHOPIFY_OAUTH_SCOPES` (defaults match the custom-app scope list below).
 - One row per `(user_id, shop_domain)` storing the Admin API access token.
 - **RLS**: Users can `select` / `insert` / `update` / `delete` only rows where `user_id = auth.uid()`.
 - **Plaintext token in Postgres** is acceptable only for a trusted operator surface; prefer **Shopify OAuth** for production-style deployments so tokens are scoped and revocable without DB reads.
