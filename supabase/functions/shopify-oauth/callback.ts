@@ -59,7 +59,7 @@ export async function handleCallback(req: Request): Promise<Response> {
   const admin = createClient(supabaseUrl, serviceKey);
   const { data: row, error: rowErr } = await admin
     .from("shopify_oauth_states")
-    .select("user_id, shop_domain, expires_at, consumed_at")
+    .select("user_id, shop_domain, expires_at, consumed_at, pending_claim_nonce")
     .eq("state", state)
     .maybeSingle();
 
@@ -169,7 +169,11 @@ export async function handleCallback(req: Request): Promise<Response> {
     return redirect(returnUrl, signedInParams);
   } else {
     const pendingExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    const claimNonce = crypto.randomUUID();
+    const fromState = row.pending_claim_nonce as string | null | undefined;
+    const claimNonce =
+      typeof fromState === "string" && fromState.trim().length > 0
+        ? fromState.trim()
+        : crypto.randomUUID();
     const { error: pendErr } = await admin.from("shopify_oauth_pending").upsert(
       {
         shop_domain: shopHost,

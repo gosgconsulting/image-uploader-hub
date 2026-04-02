@@ -15,8 +15,64 @@ const UUID_RE =
 
 type ToastFn = (props: ToastProps & { action?: ToastActionElement }) => void;
 
+async function completeShopifyInstallClaimFlow(opts: {
+  claimNonce: string;
+  normalized: string;
+  toast: ToastFn;
+  setShopifyShop: Dispatch<SetStateAction<string>>;
+  setShopifyConnectionId: Dispatch<SetStateAction<string>>;
+}): Promise<void> {
+  const { claimNonce, normalized, toast, setShopifyShop, setShopifyConnectionId } = opts;
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    if (normalized) {
+      sessionStorage.setItem(SS_SHOPIFY_CLAIM_SHOP, normalized);
+    }
+    toast({
+      title: "Almost done",
+      description:
+        "Sign in on this site with the same browser. Your shop will link automatically for refunds.",
+    });
+    return;
+  }
+
+  const claimResult = await claimShopifyInstall({
+    claimNonce: claimNonce || undefined,
+    shop: normalized || undefined,
+  });
+
+  if (claimResult.ok) {
+    sessionStorage.removeItem(SS_SHOPIFY_CLAIM_NONCE);
+    sessionStorage.removeItem(SS_SHOPIFY_CLAIM_SHOP);
+    if (claimResult.shop_domain) {
+      localStorage.setItem("shopify_shop", claimResult.shop_domain);
+      setShopifyShop(claimResult.shop_domain);
+    }
+    const cid = claimResult.credential_id?.trim() ?? "";
+    if (cid && UUID_RE.test(cid)) {
+      localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, cid);
+      setShopifyConnectionId(cid);
+    }
+    toast({
+      title: "Shopify linked",
+      description:
+        "Install finished. This shop is tied to your account for server-side refunds.",
+    });
+  } else {
+    toast({
+      title: "Finish linking",
+      description: "error" in claimResult ? claimResult.error : "Unknown error",
+      variant: "destructive",
+    });
+  }
+}
+
 /**
- * Handles `?shopify_oauth=...` on the Refund URL after Shopify redirects back.
+ * Handles `?shopify_oauth=...` after Shopify redirects to Refund, and bare
+ * `?shop=…&shopify_claim=…` (e.g. from bookmarks or the embedded install escape URL).
  */
 export function useRefundShopifyOAuthReturnParams(
   searchParams: URLSearchParams,
@@ -97,54 +153,70 @@ export function useRefundShopifyOAuthReturnParams(
 
     void (async () => {
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session) {
-          if (normalized) {
-            sessionStorage.setItem(SS_SHOPIFY_CLAIM_SHOP, normalized);
-          }
-          toast({
-            title: "Almost done",
-            description:
-              "Sign in on this site with the same browser. Your shop will link automatically for refunds.",
-          });
-          return;
-        }
-
-        const claimResult = await claimShopifyInstall({
-          claimNonce: claimNonce || undefined,
-          shop: normalized || undefined,
+        await completeShopifyInstallClaimFlow({
+          claimNonce,
+          normalized,
+          toast,
+          setShopifyShop,
+          setShopifyConnectionId,
         });
-
-        if (claimResult.ok) {
-          sessionStorage.removeItem(SS_SHOPIFY_CLAIM_NONCE);
-          sessionStorage.removeItem(SS_SHOPIFY_CLAIM_SHOP);
-          if (claimResult.shop_domain) {
-            localStorage.setItem("shopify_shop", claimResult.shop_domain);
-            setShopifyShop(claimResult.shop_domain);
-          }
-          const cid = claimResult.credential_id?.trim() ?? "";
-          if (cid && UUID_RE.test(cid)) {
-            localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, cid);
-            setShopifyConnectionId(cid);
-          }
-          toast({
-            title: "Shopify linked",
-            description:
-              "Install finished. This shop is tied to your account for server-side refunds.",
-          });
-        } else {
-          toast({
-            title: "Finish linking",
-            description: "error" in claimResult ? claimResult.error : "Unknown error",
-            variant: "destructive",
-          });
-        }
       } finally {
         sessionStorage.removeItem(lockKey);
         clearOAuthParams();
+        void hydrateShopifySession();
+      }
+    })();
+  }, [
+    searchParams,
+    setSearchParams,
+    toast,
+    hydrateShopifySession,
+    setShopifyShop,
+    setShopifyConnectionId,
+  ]);
+
+  useEffect(() => {
+    if (searchParams.get("shopify_oauth")) return;
+
+    const claimNonce = searchParams.get("shopify_claim")?.trim() ?? "";
+    const shop = searchParams.get("shop")?.trim() ?? "";
+    if (!claimNonce || !shop || !UUID_RE.test(claimNonce)) return;
+
+    const normalized = normalizeShopDomain(shop);
+    if (!normalized.endsWith(".myshopify.com")) return;
+
+    const clearBareParams = () => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("shop");
+        next.delete("shopify_claim");
+        return next;
+      }, { replace: true });
+    };
+
+    const lockKey = `oauth_proc_nonce:${claimNonce}`;
+    if (sessionStorage.getItem(lockKey)) {
+      clearBareParams();
+      return;
+    }
+    sessionStorage.setItem(lockKey, "1");
+
+    setShopifyShop(normalized);
+    localStorage.setItem("shopify_shop", normalized);
+    sessionStorage.setItem(SS_SHOPIFY_CLAIM_NONCE, claimNonce);
+
+    void (async () => {
+      try {
+        await completeShopifyInstallClaimFlow({
+          claimNonce,
+          normalized,
+          toast,
+          setShopifyShop,
+          setShopifyConnectionId,
+        });
+      } finally {
+        sessionStorage.removeItem(lockKey);
+        clearBareParams();
         void hydrateShopifySession();
       }
     })();

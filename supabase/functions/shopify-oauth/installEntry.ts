@@ -8,7 +8,11 @@ import { randomStateToken } from "./oauthCrypto.ts";
  * the app origin instead (public/shopify-oauth-embed.html).
  * @see https://supabase.com/docs/guides/functions/http-methods
  */
-function embedEscapeRedirect(authorizeUrl: string): Response {
+function embedEscapeRedirect(
+  authorizeUrl: string,
+  shopHost: string,
+  pendingClaimNonce: string
+): Response {
   const returnUrlRaw = Deno.env.get("SHOPIFY_OAUTH_RETURN_URL");
   if (!returnUrlRaw?.trim()) {
     return new Response(
@@ -27,7 +31,11 @@ function embedEscapeRedirect(authorizeUrl: string): Response {
   const customPage = Deno.env.get("SHOPIFY_OAUTH_EMBED_PAGE")?.trim();
   const embedPage = customPage || `${origin}/shopify-oauth-embed.html`;
   const joiner = embedPage.includes("?") ? "&" : "?";
-  const target = `${embedPage}${joiner}authorize=${encodeURIComponent(authorizeUrl)}`;
+  const qs = new URLSearchParams();
+  qs.set("authorize", authorizeUrl);
+  qs.set("shop", shopHost);
+  qs.set("shopify_claim", pendingClaimNonce);
+  const target = `${embedPage}${joiner}${qs.toString()}`;
   return Response.redirect(target, 302);
 }
 
@@ -70,6 +78,7 @@ export async function handleInstallEntry(req: Request): Promise<Response> {
 
   const admin = createClient(supabaseUrl, serviceKey);
   const state = randomStateToken();
+  const pendingClaimNonce = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
   const { error: insErr } = await admin.from("shopify_oauth_states").insert({
@@ -77,6 +86,7 @@ export async function handleInstallEntry(req: Request): Promise<Response> {
     user_id: null,
     shop_domain: host,
     expires_at: expiresAt,
+    pending_claim_nonce: pendingClaimNonce,
   });
 
   if (insErr) {
@@ -96,7 +106,7 @@ export async function handleInstallEntry(req: Request): Promise<Response> {
     embedded === "1" || embedded?.toLowerCase() === "true";
 
   if (breakOutOfIframe) {
-    return embedEscapeRedirect(authorizeUrl);
+    return embedEscapeRedirect(authorizeUrl, host, pendingClaimNonce);
   }
 
   return Response.redirect(authorizeUrl, 302);

@@ -11,6 +11,14 @@
     (function () {
       var p = new URLSearchParams(window.location.search);
       var u = p.get("authorize");
+      var shop = p.get("shop");
+      var claim = p.get("shopify_claim");
+      if (shop && claim) {
+        try {
+          sessionStorage.setItem("shopify_pending_claim_shop", shop);
+          sessionStorage.setItem("shopify_pending_claim_nonce", claim);
+        } catch (e) {}
+      }
       if (!u) return;
       try {
         var url = new URL(u);
