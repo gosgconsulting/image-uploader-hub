@@ -19,6 +19,19 @@ const DEFAULT_STATUS_FILTER: StatusFilter = [
   "failed",
 ];
 
+/** Same copy as in enrich error path — used to detect rows that should retry once credentials exist. */
+const SHOPIFY_NOT_CONFIGURED_MSG =
+  "Configure Shopify shop and Admin API token.";
+
+function needsShopifyEnrichment(r: Refund): boolean {
+  if (!r.shopifyNumericOrderId) return false;
+  if (r.shopifyFetchStatus === "loading") return true;
+  return (
+    r.shopifyFetchStatus === "error" &&
+    r.shopifyFetchError === SHOPIFY_NOT_CONFIGURED_MSG
+  );
+}
+
 export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
   const [refunds, setRefunds] = useState<Refund[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -72,9 +85,7 @@ export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
     async (rows: Refund[]) => {
       const shop = shopifyShop.trim();
       const token = shopifyToken.trim();
-      const targets = rows.filter(
-        (r) => r.shopifyFetchStatus === "loading" && r.shopifyNumericOrderId
-      );
+      const targets = rows.filter(needsShopifyEnrichment);
 
       if (targets.length === 0) return;
 
@@ -82,7 +93,7 @@ export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
         for (const t of targets) {
           applyRefundPatch(t.id, {
             shopifyFetchStatus: "error",
-            shopifyFetchError: "Configure Shopify shop and Admin API token.",
+            shopifyFetchError: SHOPIFY_NOT_CONFIGURED_MSG,
           });
         }
         toast({
@@ -119,6 +130,16 @@ export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
     },
     [shopifyShop, shopifyToken, toast, applyRefundPatch]
   );
+
+  /** Pick up rows that were imported or loaded before shop/token were ready (OAuth hydrate, etc.). */
+  useEffect(() => {
+    const shop = shopifyShop.trim();
+    const token = shopifyToken.trim();
+    if (!shop || !token) return;
+    const pending = refunds.filter(needsShopifyEnrichment);
+    if (pending.length === 0) return;
+    void enrichImportedRefunds(pending);
+  }, [shopifyShop, shopifyToken, refunds, enrichImportedRefunds]);
 
   const handleImported = useCallback(
     async (rows: Refund[]) => {
