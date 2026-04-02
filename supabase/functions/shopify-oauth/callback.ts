@@ -2,8 +2,25 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { verifyShopifyOAuthHmac } from "./hmacVerify.ts";
 import { persistShopifyInstallToken } from "./persistInstallToken.ts";
 
+/**
+ * OAuth completion is handled on the SPA `/refund` route (`useRefundShopifyOAuthReturnParams`).
+ * If `SHOPIFY_OAUTH_RETURN_URL` is only the site origin (pathname `/`), query params would
+ * land on `/` and are lost when the user opens Refund.
+ */
+function oauthReturnTargetUrl(returnUrlRaw: string): URL {
+  const u = new URL(returnUrlRaw.trim());
+  const path = u.pathname.replace(/\/+$/, "") || "/";
+  if (path === "/") {
+    u.pathname = "/refund";
+    u.hash = "";
+  } else {
+    u.pathname = path;
+  }
+  return u;
+}
+
 function redirect(returnUrl: string, params: Record<string, string>): Response {
-  const u = new URL(returnUrl);
+  const u = oauthReturnTargetUrl(returnUrl);
   for (const [k, v] of Object.entries(params)) {
     u.searchParams.set(k, v);
   }

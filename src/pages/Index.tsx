@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImportTable } from "@/components/ImportTable";
@@ -21,7 +22,25 @@ interface Import {
   import_images: ImportImage[];
 }
 
+const SHOPIFY_CLAIM_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export default function Index() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (searchParams.has("shopify_oauth")) {
+      navigate({ pathname: "/refund", search: `?${searchParams.toString()}` }, { replace: true });
+      return;
+    }
+    const claim = searchParams.get("shopify_claim")?.trim() ?? "";
+    const shop = searchParams.get("shop")?.trim() ?? "";
+    if (claim && shop && SHOPIFY_CLAIM_UUID_RE.test(claim)) {
+      navigate({ pathname: "/refund", search: `?${searchParams.toString()}` }, { replace: true });
+    }
+  }, [searchParams, navigate]);
+
   const [imports, setImports] = useState<Import[]>([]);
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState(
