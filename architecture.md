@@ -33,7 +33,7 @@ Configure the Shopify custom app with at least:
 
 - The **browser must not** perform refund writes with the Admin token in production builds exposed to end users.
 - **`shopify-create-refund` Edge Function** is the only component that calls Shopify with the secret token.
-- The client calls the function with the user’s **Supabase JWT** (`Authorization: Bearer …`) and non-secret inputs: normalized shop domain and refund row UUIDs.
+- The client calls the function with **`Authorization: Bearer …`** either as the user’s **Supabase JWT** (loads `shopify_credentials`) or, when embedded, a **Shopify session token** from App Bridge (HS256, verified with `SHOPIFY_CLIENT_SECRET`; loads **`shopify_install_tokens`** for that shop). Non-secret JSON body: normalized shop domain and refund row UUIDs.
 - **Secrets**: `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_URL` are provided by Supabase at runtime; the function validates the JWT then uses the service role to read credentials and update refund rows.
 
 ### Credentials (`shopify_credentials`)

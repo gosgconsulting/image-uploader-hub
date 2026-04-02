@@ -100,6 +100,24 @@ export type Database = {
         }
         Relationships: []
       }
+      shopify_install_tokens: {
+        Row: {
+          shop_domain: string
+          access_token: string
+          updated_at: string
+        }
+        Insert: {
+          shop_domain: string
+          access_token: string
+          updated_at?: string
+        }
+        Update: {
+          shop_domain?: string
+          access_token?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       refunds: {
         Row: {
           id: string

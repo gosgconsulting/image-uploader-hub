@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DollarSign, Plus, Loader2 } from "lucide-react";
 import { RefundTable } from "@/components/RefundTable";
 import { ShopifySettings } from "@/components/ShopifySettings";
@@ -14,6 +15,7 @@ import { useRefundBulkSelection } from "@/pages/refund/useRefundBulkSelection";
 
 export default function Refund() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [searchParams] = useSearchParams();
   const {
     shopifyShop,
     setShopifyShop,
@@ -22,6 +24,10 @@ export default function Refund() {
     handleShopifyAfterSave,
     shopifyEmbeddedContextActive,
   } = useRefundShopifySession();
+
+  const embeddedHost = shopifyEmbeddedContextActive
+    ? searchParams.get("host")
+    : null;
 
   const needsManualShopifySettings =
     !shopifyEmbeddedContextActive || !shopifyToken.trim();
@@ -49,11 +55,9 @@ export default function Refund() {
     selectedRefunds,
     handleBulkRefund,
     handleConfirmBulkRefund,
-  } = useRefundBulkSelection(
-    filteredAndSortedRefunds,
-    shopifyShop,
-    loadRefunds
-  );
+  } = useRefundBulkSelection(filteredAndSortedRefunds, shopifyShop, loadRefunds, {
+    embeddedHost,
+  });
 
   return (
     <div className="min-h-screen bg-background">

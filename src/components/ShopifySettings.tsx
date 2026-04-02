@@ -136,9 +136,12 @@ export function ShopifySettings({
             <div className="space-y-2 rounded-md border border-border/80 bg-muted/30 p-2.5">
               <p className="text-[11px] text-muted-foreground leading-snug">
                 Install the app from <span className="font-medium text-foreground">Shopify Admin</span> (Apps →
-                your app → Install). Shopify opens our app URL, then sends you back here.{" "}
-                <span className="font-medium text-foreground">Sign in</span> on this site so the token links to
-                your account for server-side refunds (same as pasting a token manually).
+                your app → Install). Shopify opens our app URL, then sends you back here. When you open the
+                Refund page <span className="font-medium text-foreground">embedded</span> in Admin, bulk refunds
+                can use Shopify session tokens (set <span className="font-mono">VITE_SHOPIFY_CLIENT_ID</span>
+                ). <span className="font-medium text-foreground">Sign in</span> here if you also want the token
+                in your account (<span className="font-mono">shopify_credentials</span>)—same idea as pasting a
+                token manually.
               </p>
             </div>
           ) : null}

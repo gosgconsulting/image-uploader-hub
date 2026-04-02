@@ -14,7 +14,8 @@ export type ProcessRefundsResponse = {
 
 export async function invokeProcessShopifyRefunds(
   shopDomain: string,
-  refundIds: string[]
+  refundIds: string[],
+  options?: { authorizationBearer?: string }
 ): Promise<{ data: ProcessRefundsResponse | null; error: Error | null }> {
   const trimmed = shopDomain.trim();
   if (!trimmed) {
@@ -24,9 +25,15 @@ export async function invokeProcessShopifyRefunds(
     return { data: null, error: new Error("No refunds selected") };
   }
 
+  const bearer = options?.authorizationBearer?.trim();
   const { data, error } = await supabase.functions.invoke<ProcessRefundsResponse>(
     "shopify-create-refund",
-    { body: { shopDomain: trimmed, refundIds } }
+    {
+      body: { shopDomain: trimmed, refundIds },
+      ...(bearer
+        ? { headers: { Authorization: `Bearer ${bearer}` } }
+        : {}),
+    }
   );
 
   if (error) {

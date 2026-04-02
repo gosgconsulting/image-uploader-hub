@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { verifyShopifyOAuthHmac } from "./hmacVerify.ts";
+import { persistShopifyInstallToken } from "./persistInstallToken.ts";
 
 function redirect(returnUrl: string, params: Record<string, string>): Response {
   const u = new URL(returnUrl);
@@ -124,6 +125,18 @@ export async function handleCallback(req: Request): Promise<Response> {
     "state",
     state
   );
+
+  const installSaved = await persistShopifyInstallToken(
+    admin,
+    shopHost,
+    tokenJson.access_token
+  );
+  if (!installSaved.ok) {
+    return redirect(returnUrl, {
+      shopify_oauth: "error",
+      reason: "Could not persist install token",
+    });
+  }
 
   if (userId) {
     const { error: upErr } = await admin.from("shopify_credentials").upsert(

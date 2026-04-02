@@ -34,10 +34,13 @@ Use a **Shopify custom or public app** in the Partner Dashboard (or dev store cu
 
 Match the default scopes or set `SHOPIFY_OAUTH_SCOPES` on the function: `read_orders`, `write_orders`.
 
-1. Apply migrations (includes `shopify_oauth_states`, `shopify_oauth_pending`, `claim_nonce` on pending).
-2. Set Edge Function secrets: `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_OAUTH_RETURN_URL` (full URL to the Refund page, e.g. `https://your-domain/refund` or `http://localhost:5173/refund` for local dev).
-3. Deploy: `supabase functions deploy shopify-oauth`
-4. Frontend: `VITE_SAVE_SHOPIFY_CREDENTIALS=true` and `VITE_SHOPIFY_OAUTH_ENABLED=true`. Merchants **install from Shopify Admin**; after OAuth the callback redirects to `SHOPIFY_OAUTH_RETURN_URL` with `shopify_oauth=success`, `shop=…`, and **`shopify_claim=<uuid>`** (one-time link to the pending token). The Refund page uses that UUID to claim into `shopify_credentials` after **sign in** (instructions under **Shopify API**).
+1. Apply migrations (includes `shopify_oauth_states`, `shopify_oauth_pending`, `shopify_install_tokens`, `claim_nonce` on pending).
+2. Set Edge Function secrets on **`shopify-oauth`**: `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_OAUTH_RETURN_URL` (full URL to the Refund page, e.g. `https://your-domain/refund` or `http://localhost:5173/refund` for local dev).  
+   Set the **same** `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` on **`shopify-create-refund`** so it can verify [Shopify session tokens](https://shopify.dev/docs/apps/auth/oauth/session-tokens) (HS256) and load the offline token from `shopify_install_tokens`.
+3. Deploy: `supabase functions deploy shopify-oauth` and `supabase functions deploy shopify-create-refund`
+4. Frontend: `VITE_SAVE_SHOPIFY_CREDENTIALS=true`, `VITE_SHOPIFY_OAUTH_ENABLED=true`, and **`VITE_SHOPIFY_CLIENT_ID`** (same value as `SHOPIFY_CLIENT_ID`) for [App Bridge](https://shopify.dev/docs/api/app-bridge) session tokens when the Refund app runs **embedded** in Shopify Admin. Merchants **install from Shopify Admin**; after OAuth the callback stores the offline Admin token in **`shopify_install_tokens`** (and pending / user credentials as before). The Refund page can run **bulk refunds embedded** using a fresh session token without Supabase sign-in, as long as OAuth has completed once for that shop.
+
+Optional: after OAuth, **`shopify_claim=<uuid>`** still lets a signed-in user copy the token into `shopify_credentials` (see **Shopify API** in the UI).
 
 **Embedded apps** (`embedded=1`): (1) A 302 to `/admin/oauth/authorize` inside the admin iframe would be blank (Shopify blocks framing that page). (2) **Supabase Edge Functions rewrite `GET` responses with `Content-Type: text/html` to `text/plain`**, so returning HTML from `shopify-oauth` shows source, not a rendered page ([docs](https://supabase.com/docs/guides/functions/http-methods)).
 

@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { normalizeShopDomain, pickParentAndRefundAmount } from "./refundLogic.ts";
 import { formatShopifyError, normalizeTransactions, shopifyJson } from "./shopifyHttp.ts";
+import { resolveRefundAccessToken } from "./resolveRefundAccessToken.ts";
 
 const SHOPIFY_API_VERSION = "2024-10";
 const MAX_BATCH = 40;
@@ -61,30 +62,11 @@ serve(async (req) => {
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
-  const {
-    data: { user },
-    error: userErr,
-  } = await admin.auth.getUser(jwt);
-
-  if (userErr || !user) {
-    return json({ error: "Invalid or expired session" }, 401);
+  const resolved = await resolveRefundAccessToken(admin, jwt, normalizedShop);
+  if (!resolved.ok) {
+    return json({ error: resolved.error }, resolved.status);
   }
-
-  const { data: cred, error: credErr } = await admin
-    .from("shopify_credentials")
-    .select("access_token")
-    .eq("user_id", user.id)
-    .eq("shop_domain", normalizedShop)
-    .maybeSingle();
-
-  if (credErr || !cred?.access_token) {
-    return json(
-      { error: "No Shopify credentials for this shop. Save them in the app while signed in." },
-      400
-    );
-  }
-
-  const accessToken = cred.access_token as string;
+  const accessToken = resolved.accessToken;
   const results: Array<{
     id: string;
     ok: boolean;
