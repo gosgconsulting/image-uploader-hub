@@ -39,6 +39,10 @@ Match the default scopes or set `SHOPIFY_OAUTH_SCOPES` on the function: `read_or
 3. Deploy: `supabase functions deploy shopify-oauth`
 4. Frontend: `VITE_SAVE_SHOPIFY_CREDENTIALS=true` and `VITE_SHOPIFY_OAUTH_ENABLED=true`. Merchants **install from Shopify Admin**; after redirect back to Refund, **sign in** on this app so the token is claimed into `shopify_credentials` (instructions also appear under **Shopify API** in the UI).
 
+**Embedded apps** (`embedded=1`): (1) A 302 to `/admin/oauth/authorize` inside the admin iframe would be blank (Shopify blocks framing that page). (2) **Supabase Edge Functions rewrite `GET` responses with `Content-Type: text/html` to `text/plain`**, so returning HTML from `shopify-oauth` shows source, not a rendered page ([docs](https://supabase.com/docs/guides/functions/http-methods)).
+
+Instead, when embedded, the function **302-redirects** to **`{origin of SHOPIFY_OAUTH_RETURN_URL}/shopify-oauth-embed.html?authorize=…`**, where `shopify-oauth-embed.html` is the static file in **`public/`** (served by your Vite host with real `text/html`). That page runs **`window.top.location.replace(authorizeUrl)`**. Deploy the frontend so that URL exists on the same origin as `SHOPIFY_OAUTH_RETURN_URL`. Optional Edge secret **`SHOPIFY_OAUTH_EMBED_PAGE`**: full URL to that HTML file if it is not at `/shopify-oauth-embed.html` on the return URL origin.
+
 ## Testing
 
 - Run all tests: npm run test
