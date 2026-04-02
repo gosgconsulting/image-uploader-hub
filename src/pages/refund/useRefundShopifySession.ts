@@ -11,6 +11,9 @@ import { shopDomainFromEmbeddedAppSearch } from "@/lib/shopifyEmbeddedContext";
 import { supabase } from "@/integrations/supabase/client";
 import { claimShopifyInstall } from "@/lib/shopifyOAuth";
 
+const SS_CLAIM_NONCE = "shopify_pending_claim_nonce";
+const SS_CLAIM_SHOP = "shopify_pending_claim_shop";
+
 export function useRefundShopifySession() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [shopifyShop, setShopifyShop] = useState(
@@ -28,20 +31,43 @@ export function useRefundShopifySession() {
       data: { session },
     } = await supabase.auth.getSession();
 
-    const pendingClaim = sessionStorage.getItem("shopify_pending_claim_shop");
-    if (session && pendingClaim) {
-      const claim = await claimShopifyInstall(pendingClaim);
+    const pendingNonce = sessionStorage.getItem(SS_CLAIM_NONCE);
+    if (session && pendingNonce) {
+      const claim = await claimShopifyInstall({ claimNonce: pendingNonce });
       if (claim.ok) {
-        sessionStorage.removeItem("shopify_pending_claim_shop");
+        sessionStorage.removeItem(SS_CLAIM_NONCE);
+        sessionStorage.removeItem(SS_CLAIM_SHOP);
+        if (claim.shop_domain) {
+          localStorage.setItem("shopify_shop", claim.shop_domain);
+          setShopifyShop(claim.shop_domain);
+        }
         toast({
           title: "Shopify linked",
           description: "Your Admin install is now tied to this account for server-side refunds.",
         });
       }
+    } else if (session) {
+      const pendingClaim = sessionStorage.getItem(SS_CLAIM_SHOP);
+      if (pendingClaim) {
+        const claim = await claimShopifyInstall({ shop: pendingClaim });
+        if (claim.ok) {
+          sessionStorage.removeItem(SS_CLAIM_SHOP);
+          if (claim.shop_domain) {
+            localStorage.setItem("shopify_shop", claim.shop_domain);
+            setShopifyShop(claim.shop_domain);
+          }
+          toast({
+            title: "Shopify linked",
+            description: "Your Admin install is now tied to this account for server-side refunds.",
+          });
+        }
+      }
     }
 
-    if (session && shop) {
-      const row = await fetchShopifyCredential(shop);
+    const shopAfter = localStorage.getItem("shopify_shop") || "";
+    setShopifyShop(shopAfter);
+    if (session && shopAfter) {
+      const row = await fetchShopifyCredential(shopAfter);
       setShopifyToken(
         row?.access_token ?? localStorage.getItem("shopify_admin_token") ?? ""
       );
@@ -81,64 +107,111 @@ export function useRefundShopifySession() {
 
     const reason = searchParams.get("reason") ?? "";
     const shop = searchParams.get("shop") ?? "";
+    const claimNonce = searchParams.get("shopify_claim") ?? "";
+    const normalized = shop ? normalizeShopDomain(shop) : "";
 
-    if (o === "success" && shop) {
-      const normalized = normalizeShopDomain(shop);
-      if (normalized) {
-        setShopifyShop(normalized);
-        localStorage.setItem("shopify_shop", normalized);
-      }
+    const clearOAuthParams = () => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("shopify_oauth");
+        next.delete("shop");
+        next.delete("reason");
+        next.delete("shopify_claim");
+        return next;
+      }, { replace: true });
+    };
 
-      void (async () => {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session && normalized) {
-          const claim = await claimShopifyInstall(normalized);
-          if (!claim.ok) {
-            toast({
-              title: "Finish linking",
-              description: "error" in claim ? claim.error : "Unknown error",
-              variant: "destructive",
-            });
-          } else {
-            toast({
-              title: "Shopify linked",
-              description:
-                "Install finished. This shop is tied to your account for server-side refunds.",
-            });
-          }
-        } else if (normalized) {
-          sessionStorage.setItem("shopify_pending_claim_shop", normalized);
-          toast({
-            title: "Almost done",
-            description:
-              "Sign in on this site with the same browser. Your shop will link automatically for refunds.",
-          });
-        } else {
-          toast({
-            title: "Shopify install completed",
-            description: "Could not read shop from redirect; set the shop domain in settings if needed.",
-          });
-        }
-        void hydrateShopifySession();
-      })();
-    } else if (o === "error") {
+    if (o === "error") {
       toast({
         title: "Shopify connection failed",
         description: reason || "Unknown error",
         variant: "destructive",
       });
+      clearOAuthParams();
+      void hydrateShopifySession();
+      return;
     }
 
-    const next = new URLSearchParams(searchParams);
-    next.delete("shopify_oauth");
-    next.delete("shop");
-    next.delete("reason");
-    setSearchParams(next, { replace: true });
     if (o !== "success") {
-      void hydrateShopifySession();
+      clearOAuthParams();
+      return;
     }
+
+    if (!normalized && !claimNonce) {
+      toast({
+        title: "Shopify install completed",
+        description: "Missing link data in the URL. Open the app from Shopify Admin again.",
+      });
+      clearOAuthParams();
+      void hydrateShopifySession();
+      return;
+    }
+
+    const lockKey = claimNonce
+      ? `oauth_proc_nonce:${claimNonce}`
+      : `oauth_proc_shop:${normalized}`;
+    if (sessionStorage.getItem(lockKey)) {
+      clearOAuthParams();
+      return;
+    }
+    sessionStorage.setItem(lockKey, "1");
+
+    if (normalized) {
+      setShopifyShop(normalized);
+      localStorage.setItem("shopify_shop", normalized);
+    }
+    if (claimNonce) {
+      sessionStorage.setItem(SS_CLAIM_NONCE, claimNonce);
+    }
+
+    void (async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          if (normalized) {
+            sessionStorage.setItem(SS_CLAIM_SHOP, normalized);
+          }
+          toast({
+            title: "Almost done",
+            description:
+              "Sign in on this site with the same browser. Your shop will link automatically for refunds.",
+          });
+          return;
+        }
+
+        const claimResult = await claimShopifyInstall({
+          claimNonce: claimNonce || undefined,
+          shop: normalized || undefined,
+        });
+
+        if (claimResult.ok) {
+          sessionStorage.removeItem(SS_CLAIM_NONCE);
+          sessionStorage.removeItem(SS_CLAIM_SHOP);
+          if (claimResult.shop_domain) {
+            localStorage.setItem("shopify_shop", claimResult.shop_domain);
+            setShopifyShop(claimResult.shop_domain);
+          }
+          toast({
+            title: "Shopify linked",
+            description:
+              "Install finished. This shop is tied to your account for server-side refunds.",
+          });
+        } else {
+          toast({
+            title: "Finish linking",
+            description: "error" in claimResult ? claimResult.error : "Unknown error",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        sessionStorage.removeItem(lockKey);
+        clearOAuthParams();
+        void hydrateShopifySession();
+      }
+    })();
   }, [searchParams, setSearchParams, toast, hydrateShopifySession]);
 
   const handleShopifyAfterSave = useCallback(

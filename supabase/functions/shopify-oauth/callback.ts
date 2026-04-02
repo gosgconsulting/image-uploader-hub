@@ -143,11 +143,13 @@ export async function handleCallback(req: Request): Promise<Response> {
     }
   } else {
     const pendingExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const claimNonce = crypto.randomUUID();
     const { error: pendErr } = await admin.from("shopify_oauth_pending").upsert(
       {
         shop_domain: shopHost,
         access_token: tokenJson.access_token,
         expires_at: pendingExpires,
+        claim_nonce: claimNonce,
       },
       { onConflict: "shop_domain" }
     );
@@ -158,6 +160,12 @@ export async function handleCallback(req: Request): Promise<Response> {
         reason: "Could not store install token",
       });
     }
+
+    return redirect(returnUrl, {
+      shopify_oauth: "success",
+      shop: shopHost,
+      shopify_claim: claimNonce,
+    });
   }
 
   return redirect(returnUrl, {
