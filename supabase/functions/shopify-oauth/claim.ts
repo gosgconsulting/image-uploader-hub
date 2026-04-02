@@ -1,9 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
-
-const cors = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "./cors.ts";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -11,7 +7,7 @@ const UUID_RE =
 function json(res: unknown, status = 200) {
   return new Response(JSON.stringify(res), {
     status,
-    headers: { ...cors, "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
@@ -27,7 +23,7 @@ type PendingRow = {
   expires_at: string;
 };
 
-export async function handleClaim(req: Request): Promise<Response> {
+export async function handleClaim(req: Request, parsedBody?: unknown): Promise<Response> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return json({ error: "Missing authorization" }, 401);
@@ -35,10 +31,17 @@ export async function handleClaim(req: Request): Promise<Response> {
   const jwt = authHeader.slice(7);
 
   let body: { shop?: string; claimNonce?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return json({ error: "Invalid JSON body" }, { status: 400 });
+  if (parsedBody !== undefined) {
+    if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
+      return json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+    body = parsedBody as { shop?: string; claimNonce?: string };
+  } else {
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "Invalid JSON body" }, { status: 400 });
+    }
   }
 
   const rawNonce = typeof body.claimNonce === "string" ? body.claimNonce.trim() : "";

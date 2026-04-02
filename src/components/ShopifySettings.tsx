@@ -9,8 +9,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { isShopifyCredentialsSupabasePersistenceEnabled } from "@/lib/shopify-credentials";
-import { isShopifyOAuthEnabled } from "@/lib/shopifyOAuth";
+import {
+  hasShopifyAdminCredentials,
+  isShopifyCredentialsSupabasePersistenceEnabled,
+} from "@/lib/shopify-credentials";
+import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
+import { beginShopifyManualOAuth, isShopifyOAuthEnabled } from "@/lib/shopifyOAuth";
+import type { ShopifyLiveConnectionStatus } from "@/hooks/useShopifyLiveConnectionTest";
+import { ShopifySettingsStatusBlock } from "@/components/ShopifySettingsStatusBlock";
 
 interface ShopifySettingsProps {
   shop: string;
@@ -19,6 +25,9 @@ interface ShopifySettingsProps {
   onAdminTokenChange: (token: string) => void;
   /** After local state + shop localStorage; return whether token was stored in Supabase. */
   onAfterSave?: (shop: string, token: string) => Promise<{ serverSaved: boolean }>;
+  /** Live `GET shop.json` check (e.g. once per Refund page load). */
+  liveConnectionStatus?: ShopifyLiveConnectionStatus;
+  liveConnectionError?: string | null;
 }
 
 export function ShopifySettings({
@@ -27,14 +36,18 @@ export function ShopifySettings({
   onShopChange,
   onAdminTokenChange,
   onAfterSave,
+  liveConnectionStatus,
+  liveConnectionError,
 }: ShopifySettingsProps) {
   const [shopValue, setShopValue] = useState(shop);
   const [tokenValue, setTokenValue] = useState(adminAccessToken);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const showShopifyInstallHelp =
-    isShopifyOAuthEnabled() && isShopifyCredentialsSupabasePersistenceEnabled();
+  const oauthUi = isShopifyOAuthEnabled();
+  const sessionConnected = hasShopifyAdminCredentials(shop, adminAccessToken);
+  const formShopMatchesSaved =
+    normalizeShopDomain(shopValue) === normalizeShopDomain(shop);
 
   useEffect(() => {
     setShopValue(shop);
@@ -50,6 +63,22 @@ export function ShopifySettings({
     setConnectionError(null);
     setSaving(true);
     try {
+      if (oauthUi) {
+        if (!s) {
+          setConnectionError("Enter your shop domain to connect with Shopify.");
+          return;
+        }
+        const started = await beginShopifyManualOAuth(s);
+        if (started.ok === false) {
+          setConnectionError(started.error);
+          return;
+        }
+        onShopChange(s);
+        localStorage.setItem("shopify_shop", s);
+        window.location.assign(started.authorizeUrl);
+        return;
+      }
+
       if (t) {
         if (!s) {
           setConnectionError("Enter your shop domain before saving a token.");
@@ -86,12 +115,25 @@ export function ShopifySettings({
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm">
-          <Store className="h-3.5 w-3.5 mr-1.5" />
-          Shopify API
+          {sessionConnected ? (
+            <Check className="h-3.5 w-3.5 mr-1.5 text-green-600 dark:text-green-400" />
+          ) : (
+            <Store className="h-3.5 w-3.5 mr-1.5" />
+          )}
+          {oauthUi ? "Shopify" : "Shopify API"}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-96" align="end">
         <div className="space-y-3">
+          <ShopifySettingsStatusBlock
+            sessionConnected={sessionConnected}
+            shop={shop}
+            oauthUi={oauthUi}
+            liveConnectionStatus={liveConnectionStatus}
+            liveConnectionError={liveConnectionError}
+            formShopDiffers={sessionConnected && !formShopMatchesSaved}
+            shopFieldValue={shopValue}
+          />
           <div className="space-y-1.5">
             <Label className="font-mono text-xs uppercase tracking-wider">Shop domain</Label>
             <Input
@@ -104,44 +146,56 @@ export function ShopifySettings({
               autoComplete="off"
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className="font-mono text-xs uppercase tracking-wider">Admin API access token</Label>
-            <Input
-              type="password"
-              placeholder="shpat_…"
-              value={tokenValue}
-              onChange={(e) => {
-                setTokenValue(e.target.value);
-                setConnectionError(null);
-              }}
-              autoComplete="off"
-            />
-          </div>
+          {oauthUi ? null : (
+            <div className="space-y-1.5">
+              <Label className="font-mono text-xs uppercase tracking-wider">Admin API access token</Label>
+              <Input
+                type="password"
+                placeholder="shpat_…"
+                value={tokenValue}
+                onChange={(e) => {
+                  setTokenValue(e.target.value);
+                  setConnectionError(null);
+                }}
+                autoComplete="off"
+              />
+            </div>
+          )}
           <p className="text-[11px] text-muted-foreground leading-snug">
-            Use the <span className="font-mono">*.myshopify.com</span> hostname only (not a full Admin API
-            URL).{" "}
-            {isShopifyCredentialsSupabasePersistenceEnabled() ? (
+            {oauthUi ? (
               <>
-                Signed-in users can save the token to Supabase for server-side refunds. Until then, the token
-                stays in this browser (localStorage) for dev import enrichment via the Vite proxy.
+                Enter your <span className="font-mono">*.myshopify.com</span> hostname, then connect—you will
+                approve the app in Shopify and return here.{" "}
+                <span className="font-medium text-foreground">Sign in</span> first to attach the Admin token
+                to your account for server-side refunds
+                {isShopifyCredentialsSupabasePersistenceEnabled()
+                  ? " (and ensure saving credentials is enabled for this build)."
+                  : " (enable saving credentials in env if you use Supabase token storage)."}
               </>
             ) : (
               <>
-                Supabase token storage is disabled for this build; the Admin token stays in this browser
-                (localStorage) only.
+                Use the <span className="font-mono">*.myshopify.com</span> hostname only (not a full Admin API
+                URL).{" "}
+                {isShopifyCredentialsSupabasePersistenceEnabled() ? (
+                  <>
+                    Signed-in users can save the token to Supabase for server-side refunds. Until then, the
+                    token stays in this browser (localStorage) for dev import enrichment via the Vite proxy.
+                  </>
+                ) : (
+                  <>
+                    Supabase token storage is disabled for this build; the Admin token stays in this browser
+                    (localStorage) only.
+                  </>
+                )}
               </>
             )}
           </p>
-          {showShopifyInstallHelp ? (
+          {oauthUi ? (
             <div className="space-y-2 rounded-md border border-border/80 bg-muted/30 p-2.5">
               <p className="text-[11px] text-muted-foreground leading-snug">
-                Install the app from <span className="font-medium text-foreground">Shopify Admin</span> (Apps →
-                your app → Install). Shopify opens our app URL, then sends you back here. When you open the
-                Refund page <span className="font-medium text-foreground">embedded</span> in Admin, bulk refunds
-                can use Shopify session tokens (set <span className="font-mono">VITE_SHOPIFY_CLIENT_ID</span>
-                ). <span className="font-medium text-foreground">Sign in</span> here if you also want the token
-                in your account (<span className="font-mono">shopify_credentials</span>)—same idea as pasting a
-                token manually.
+                You can also install from <span className="font-medium text-foreground">Shopify Admin</span>{" "}
+                (Apps → your app). Embedded Refund flows can use App Bridge session tokens when{" "}
+                <span className="font-mono">VITE_SHOPIFY_CLIENT_ID</span> is set.
               </p>
             </div>
           ) : null}
@@ -157,7 +211,17 @@ export function ShopifySettings({
                 Saved
               </>
             ) : saving ? (
-              "Verifying & saving…"
+              oauthUi ? (
+                "Starting OAuth…"
+              ) : (
+                "Verifying & saving…"
+              )
+            ) : oauthUi ? (
+              sessionConnected ? (
+                "Reconnect with Shopify"
+              ) : (
+                "Connect with Shopify"
+              )
             ) : (
               "Save"
             )}

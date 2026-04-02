@@ -69,3 +69,46 @@ export async function claimShopifyInstall(
     error: data?.error || "Could not link shop.",
   };
 }
+
+export type BeginShopifyManualOAuthResult =
+  | { ok: true; authorizeUrl: string }
+  | { ok: false; error: string };
+
+/**
+ * Creates OAuth state on the server and returns the Shopify authorize URL.
+ * Passes the current Supabase session (if any) so the callback can attach the token to the user.
+ */
+export async function beginShopifyManualOAuth(
+  shop: string
+): Promise<BeginShopifyManualOAuthResult> {
+  const domain = normalizeShopDomain(shop.trim());
+  if (!domain.endsWith(".myshopify.com")) {
+    return { ok: false, error: "Enter a valid *.myshopify.com shop domain." };
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const headers: Record<string, string> = {};
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
+  const { data, error } = await supabase.functions.invoke<{
+    authorize_url?: string;
+    error?: string;
+  }>("shopify-oauth", {
+    body: { action: "begin_oauth", shop: domain },
+    headers,
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  const url = data?.authorize_url?.trim();
+  if (!url) {
+    return { ok: false, error: data?.error || "Could not start Shopify OAuth." };
+  }
+  return { ok: true, authorizeUrl: url };
+}

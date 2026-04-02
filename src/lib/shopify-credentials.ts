@@ -16,6 +16,16 @@ export function isShopifyCredentialsSupabasePersistenceEnabled(): boolean {
   return parseSaveShopifyCredentialsEnv(import.meta.env.VITE_SAVE_SHOPIFY_CREDENTIALS);
 }
 
+/**
+ * True when we have a *.myshopify.com hostname and a non-empty Admin token (from Supabase hydrate or localStorage).
+ * Does not verify the token with Shopify — only that credentials are present for this session.
+ */
+export function hasShopifyAdminCredentials(shop: string, adminAccessToken: string): boolean {
+  const domain = normalizeShopDomain(shop.trim());
+  if (!domain.endsWith(".myshopify.com")) return false;
+  return Boolean(adminAccessToken?.trim());
+}
+
 export async function fetchShopifyCredential(
   shopDomain: string
 ): Promise<{ access_token: string } | null> {

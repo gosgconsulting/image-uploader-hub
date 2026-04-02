@@ -23,6 +23,8 @@ export default function Refund() {
     setShopifyToken,
     handleShopifyAfterSave,
     shopifyEmbeddedContextActive,
+    shopifyLiveConnectionStatus,
+    shopifyLiveConnectionError,
   } = useRefundShopifySession();
 
   const embeddedHost = shopifyEmbeddedContextActive
@@ -100,6 +102,8 @@ export default function Refund() {
                 onShopChange={setShopifyShop}
                 onAdminTokenChange={setShopifyToken}
                 onAfterSave={handleShopifyAfterSave}
+                liveConnectionStatus={shopifyLiveConnectionStatus}
+                liveConnectionError={shopifyLiveConnectionError}
               />
             ) : (
               <div className="flex items-center gap-2">
@@ -114,6 +118,13 @@ export default function Refund() {
             )}
           </div>
         </div>
+
+        {shopifyLiveConnectionStatus === "failed" && shopifyLiveConnectionError ? (
+          <Alert variant="destructive" className="mb-6">
+            <AlertTitle className="font-mono text-sm">Shopify Admin API check failed</AlertTitle>
+            <AlertDescription className="text-sm">{shopifyLiveConnectionError}</AlertDescription>
+          </Alert>
+        ) : null}
 
         {loadError && !isLoadingList && (
           <Alert variant="destructive" className="mb-6">

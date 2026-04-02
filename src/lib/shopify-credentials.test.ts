@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseSaveShopifyCredentialsEnv } from "@/lib/shopify-credentials";
+import {
+  hasShopifyAdminCredentials,
+  parseSaveShopifyCredentialsEnv,
+} from "@/lib/shopify-credentials";
 
 describe("parseSaveShopifyCredentialsEnv", () => {
   it("defaults to disabled when undefined or empty", () => {
@@ -20,5 +23,19 @@ describe("parseSaveShopifyCredentialsEnv", () => {
     expect(parseSaveShopifyCredentialsEnv("1")).toBe(true);
     expect(parseSaveShopifyCredentialsEnv("yes")).toBe(true);
     expect(parseSaveShopifyCredentialsEnv("on")).toBe(true);
+  });
+});
+
+describe("hasShopifyAdminCredentials", () => {
+  it("is false without a valid myshopify host or token", () => {
+    expect(hasShopifyAdminCredentials("", "shpat_x")).toBe(false);
+    expect(hasShopifyAdminCredentials("example.com", "shpat_x")).toBe(false);
+    expect(hasShopifyAdminCredentials("store.myshopify.com", "")).toBe(false);
+    expect(hasShopifyAdminCredentials("store.myshopify.com", "   ")).toBe(false);
+  });
+
+  it("is true for normalized shop + token", () => {
+    expect(hasShopifyAdminCredentials("https://Store.myshopify.com/", "shpat_abc")).toBe(true);
+    expect(hasShopifyAdminCredentials("store.myshopify.com", "tok")).toBe(true);
   });
 });
