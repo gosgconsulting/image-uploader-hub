@@ -6,8 +6,9 @@ import { claimShopifyInstall } from "@/lib/shopifyOAuth";
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 import {
   LS_SHOPIFY_CONNECTION_ID,
-  SS_SHOPIFY_CLAIM_NONCE,
-  SS_SHOPIFY_CLAIM_SHOP,
+  clearPendingClaimStorage,
+  writePendingClaimToDurableStorage,
+  writePendingClaimToSessionStorage,
 } from "@/pages/refund/shopifyRefundSessionKeys";
 
 const UUID_RE =
@@ -28,9 +29,8 @@ async function completeShopifyInstallClaimFlow(opts: {
   } = await supabase.auth.getSession();
 
   if (!session) {
-    if (normalized) {
-      sessionStorage.setItem(SS_SHOPIFY_CLAIM_SHOP, normalized);
-    }
+    writePendingClaimToDurableStorage(claimNonce, normalized);
+    writePendingClaimToSessionStorage(claimNonce, normalized);
     toast({
       title: "Almost done",
       description:
@@ -45,8 +45,7 @@ async function completeShopifyInstallClaimFlow(opts: {
   });
 
   if (claimResult.ok) {
-    sessionStorage.removeItem(SS_SHOPIFY_CLAIM_NONCE);
-    sessionStorage.removeItem(SS_SHOPIFY_CLAIM_SHOP);
+    clearPendingClaimStorage();
     if (claimResult.shop_domain) {
       localStorage.setItem("shopify_shop", claimResult.shop_domain);
       setShopifyShop(claimResult.shop_domain);
@@ -72,7 +71,7 @@ async function completeShopifyInstallClaimFlow(opts: {
 
 /**
  * Handles `?shopify_oauth=...` after Shopify redirects to Refund, and bare
- * `?shop=…&shopify_claim=…` (e.g. from bookmarks or the embedded install escape URL).
+ * `?shop=…&shopify_claim=…` (e.g. bookmarks or OAuth return without `shopify_oauth=`).
  */
 export function useRefundShopifyOAuthReturnParams(
   searchParams: URLSearchParams,
@@ -139,6 +138,10 @@ export function useRefundShopifyOAuthReturnParams(
     }
     sessionStorage.setItem(lockKey, "1");
 
+    if (claimNonce && UUID_RE.test(claimNonce)) {
+      writePendingClaimToDurableStorage(claimNonce, normalized);
+    }
+
     if (normalized) {
       setShopifyShop(normalized);
       localStorage.setItem("shopify_shop", normalized);
@@ -146,9 +149,6 @@ export function useRefundShopifyOAuthReturnParams(
     if (connectionIdRaw && UUID_RE.test(connectionIdRaw)) {
       localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, connectionIdRaw);
       setShopifyConnectionId(connectionIdRaw);
-    }
-    if (claimNonce) {
-      sessionStorage.setItem(SS_SHOPIFY_CLAIM_NONCE, claimNonce);
     }
 
     void (async () => {
@@ -201,9 +201,10 @@ export function useRefundShopifyOAuthReturnParams(
     }
     sessionStorage.setItem(lockKey, "1");
 
+    writePendingClaimToDurableStorage(claimNonce, normalized);
+
     setShopifyShop(normalized);
     localStorage.setItem("shopify_shop", normalized);
-    sessionStorage.setItem(SS_SHOPIFY_CLAIM_NONCE, claimNonce);
 
     void (async () => {
       try {

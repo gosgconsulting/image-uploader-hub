@@ -14,8 +14,9 @@ import { useShopifyLiveConnectionTest } from "@/hooks/useShopifyLiveConnectionTe
 import { useRefundShopifyOAuthReturnParams } from "@/pages/refund/useRefundShopifyOAuthReturnParams";
 import {
   LS_SHOPIFY_CONNECTION_ID,
-  SS_SHOPIFY_CLAIM_NONCE,
-  SS_SHOPIFY_CLAIM_SHOP,
+  clearPendingClaimStorage,
+  readPendingClaimNonce,
+  readPendingClaimShop,
 } from "@/pages/refund/shopifyRefundSessionKeys";
 
 export function useRefundShopifySession() {
@@ -46,12 +47,15 @@ export function useRefundShopifySession() {
       setShopifyConnectionId("");
     }
 
-    const pendingNonce = sessionStorage.getItem(SS_SHOPIFY_CLAIM_NONCE);
-    if (session && pendingNonce) {
+    const urlDrivesClaim =
+      searchParams.has("shopify_oauth") ||
+      (searchParams.has("shopify_claim") && searchParams.has("shop"));
+
+    const pendingNonce = readPendingClaimNonce();
+    if (session && pendingNonce && !urlDrivesClaim) {
       const claim = await claimShopifyInstall({ claimNonce: pendingNonce });
       if (claim.ok) {
-        sessionStorage.removeItem(SS_SHOPIFY_CLAIM_NONCE);
-        sessionStorage.removeItem(SS_SHOPIFY_CLAIM_SHOP);
+        clearPendingClaimStorage();
         if (claim.shop_domain) {
           localStorage.setItem("shopify_shop", claim.shop_domain);
           setShopifyShop(claim.shop_domain);
@@ -65,12 +69,12 @@ export function useRefundShopifySession() {
           description: "Your Admin install is now tied to this account for server-side refunds.",
         });
       }
-    } else if (session) {
-      const pendingClaim = sessionStorage.getItem(SS_SHOPIFY_CLAIM_SHOP);
+    } else if (session && !urlDrivesClaim) {
+      const pendingClaim = readPendingClaimShop();
       if (pendingClaim) {
         const claim = await claimShopifyInstall({ shop: pendingClaim });
         if (claim.ok) {
-          sessionStorage.removeItem(SS_SHOPIFY_CLAIM_SHOP);
+          clearPendingClaimStorage();
           if (claim.shop_domain) {
             localStorage.setItem("shopify_shop", claim.shop_domain);
             setShopifyShop(claim.shop_domain);
@@ -108,7 +112,7 @@ export function useRefundShopifySession() {
         setShopifyConnectionId("");
       }
     }
-  }, [toast, setShopifyConnectionId]);
+  }, [toast, setShopifyConnectionId, searchParams]);
 
   useRefundShopifyOAuthReturnParams(
     searchParams,

@@ -3,45 +3,12 @@ import { verifyShopifyOAuthHmac } from "./hmacVerify.ts";
 import { randomStateToken } from "./oauthCrypto.ts";
 
 /**
- * Supabase rewrites GET responses with Content-Type text/html to text/plain, so HTML
- * from Edge Functions is shown as source. Embedded OAuth escape uses a static page on
- * the app origin instead (public/shopify-oauth-embed.html).
- * @see https://supabase.com/docs/guides/functions/http-methods
- */
-function embedEscapeRedirect(
-  authorizeUrl: string,
-  shopHost: string,
-  pendingClaimNonce: string
-): Response {
-  const returnUrlRaw = Deno.env.get("SHOPIFY_OAUTH_RETURN_URL");
-  if (!returnUrlRaw?.trim()) {
-    return new Response(
-      "SHOPIFY_OAUTH_RETURN_URL must be set for embedded Shopify apps (used to locate the HTML escape page on your app host)",
-      { status: 500 }
-    );
-  }
-
-  let origin: string;
-  try {
-    origin = new URL(returnUrlRaw.trim()).origin;
-  } catch {
-    return new Response("Invalid SHOPIFY_OAUTH_RETURN_URL", { status: 500 });
-  }
-
-  const customPage = Deno.env.get("SHOPIFY_OAUTH_EMBED_PAGE")?.trim();
-  const embedPage = customPage || `${origin}/shopify-oauth-embed.html`;
-  const joiner = embedPage.includes("?") ? "&" : "?";
-  const qs = new URLSearchParams();
-  qs.set("authorize", authorizeUrl);
-  qs.set("shop", shopHost);
-  qs.set("shopify_claim", pendingClaimNonce);
-  const target = `${embedPage}${joiner}${qs.toString()}`;
-  return Response.redirect(target, 302);
-}
-
-/**
  * Shopify loads the app URL after install with ?shop=&timestamp=&hmac=
  * (https://shopify.dev/docs/apps/auth/oauth/getting-started#step-2-verify-the-installation-request).
+ *
+ * Always 302 to Shopify authorize. This project targets a standalone Refund app (not embedded in
+ * Admin); configure the Partner app for a non-embedded install so this redirect runs in a full
+ * window—Shopify often blocks framing `/admin/oauth/authorize`.
  */
 export async function handleInstallEntry(req: Request): Promise<Response> {
   const url = new URL(req.url);
@@ -100,14 +67,6 @@ export async function handleInstallEntry(req: Request): Promise<Response> {
     `&scope=${encodeURIComponent(scopes)}` +
     `&redirect_uri=${redirectUri}` +
     `&state=${encodeURIComponent(state)}`;
-
-  const embedded = sp.get("embedded");
-  const breakOutOfIframe =
-    embedded === "1" || embedded?.toLowerCase() === "true";
-
-  if (breakOutOfIframe) {
-    return embedEscapeRedirect(authorizeUrl, host, pendingClaimNonce);
-  }
 
   return Response.redirect(authorizeUrl, 302);
 }

@@ -42,9 +42,7 @@ Match the default scopes or set `SHOPIFY_OAUTH_SCOPES` on the function: `read_or
 
 Optional: after OAuth, **`shopify_claim=<uuid>`** still lets a signed-in user copy the token into `shopify_credentials` (see **Shopify API** in the UI).
 
-**Embedded apps** (`embedded=1`): (1) A 302 to `/admin/oauth/authorize` inside the admin iframe would be blank (Shopify blocks framing that page). (2) **Supabase Edge Functions rewrite `GET` responses with `Content-Type: text/html` to `text/plain`**, so returning HTML from `shopify-oauth` shows source, not a rendered page ([docs](https://supabase.com/docs/guides/functions/http-methods)).
-
-Instead, when embedded, the function **302-redirects** to **`{origin of SHOPIFY_OAUTH_RETURN_URL}/shopify-oauth-embed.html?authorize=…`**, where `shopify-oauth-embed.html` is the static file in **`public/`** (served by your Vite host with real `text/html`). That page runs **`window.top.location.replace(authorizeUrl)`**. Deploy the frontend so that URL exists on the same origin as `SHOPIFY_OAUTH_RETURN_URL`. Optional Edge secret **`SHOPIFY_OAUTH_EMBED_PAGE`**: full URL to that HTML file if it is not at `/shopify-oauth-embed.html` on the return URL origin.
+**Install / OAuth**: the function always **302** redirects to Shopify’s **`/admin/oauth/authorize`** URL. Configure the Partner app for a **non-embedded** install (standalone / new tab) so that redirect runs in a full browser window—Shopify typically blocks loading the authorize page inside an Admin iframe.
 
 ## Testing
 
