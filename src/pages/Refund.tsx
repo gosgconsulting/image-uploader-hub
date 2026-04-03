@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DollarSign, Plus, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,12 +13,15 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useRefundShopifySession } from "@/pages/refund/useRefundShopifySession";
 import { useRefundRecords } from "@/pages/refund/useRefundRecords";
 import { useRefundBulkSelection } from "@/pages/refund/useRefundBulkSelection";
+import { RefundPagination } from "@/pages/refund/RefundPagination";
 
 const AUTH_REFUND = "/auth?next=%2Frefund";
+const REFUND_PAGE_SIZE = 20;
 const AUTH_SIGNUP_REFUND = "/auth?next=%2Frefund&tab=sign-up";
 
 export default function Refund() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [refundListPage, setRefundListPage] = useState(1);
   const [searchParams] = useSearchParams();
   const [hasAuthSession, setHasAuthSession] = useState<boolean | null>(null);
 
@@ -79,6 +82,29 @@ export default function Refund() {
     setDateSort,
     handleClearFilters,
   } = useRefundRecords(shopifyShop, shopifyToken, shopifyConnectionId);
+
+  const refundTotalCount = filteredAndSortedRefunds.length;
+  const refundTotalPages = Math.max(1, Math.ceil(refundTotalCount / REFUND_PAGE_SIZE));
+  const refundPageSafe = Math.min(refundListPage, refundTotalPages);
+  const refundPageStart = (refundPageSafe - 1) * REFUND_PAGE_SIZE;
+  const paginatedRefunds = useMemo(
+    () =>
+      filteredAndSortedRefunds.slice(
+        refundPageStart,
+        refundPageStart + REFUND_PAGE_SIZE
+      ),
+    [filteredAndSortedRefunds, refundPageStart]
+  );
+
+  useEffect(() => {
+    setRefundListPage(1);
+  }, [statusFilter, dateSort]);
+
+  useEffect(() => {
+    if (refundPageSafe !== refundListPage) {
+      setRefundListPage(refundPageSafe);
+    }
+  }, [refundPageSafe, refundListPage]);
 
   const {
     selectedRefundIds,
@@ -235,12 +261,21 @@ export default function Refund() {
             <p className="font-mono text-sm">Loading refunds…</p>
           </div>
         ) : (
-          <RefundTable
-            refunds={filteredAndSortedRefunds}
-            onRefundUpdate={applyRefundPatch}
-            selectedRefundIds={selectedRefundIds}
-            onSelectionChange={setSelectedRefundIds}
-          />
+          <>
+            <RefundTable
+              refunds={paginatedRefunds}
+              onRefundUpdate={applyRefundPatch}
+              selectedRefundIds={selectedRefundIds}
+              onSelectionChange={setSelectedRefundIds}
+            />
+            <RefundPagination
+              currentPage={refundPageSafe}
+              totalPages={refundTotalPages}
+              totalCount={refundTotalCount}
+              pageSize={REFUND_PAGE_SIZE}
+              onPageChange={setRefundListPage}
+            />
+          </>
         )}
 
         <RefundImportDialog
