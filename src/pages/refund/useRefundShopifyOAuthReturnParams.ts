@@ -6,8 +6,9 @@ import {
   LS_SHOPIFY_CONNECTION_ID,
   SHOPIFY_OAUTH_RETURN_PARAM_KEYS,
   mergeShopifyOAuthParamsFromLocation,
+  writePendingClaimToDurableStorage,
 } from "./shopifyRefundSessionKeys";
-import { refundOAuthDebugLog, writePendingClaimToDurableStorage } from "./completeShopifyInstallClaimFlow";
+import { refundOAuthDebugLog } from "./completeShopifyInstallClaimFlow";
 import { runRefundOAuthInstallClaimSideEffects } from "./refundOAuthInstallClaimSideEffects";
 import { isRefundOAuthProcLockBusy, setRefundOAuthProcLock } from "./refundOAuthProcLock";
 
