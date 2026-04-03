@@ -1,31 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { verifyShopifyOAuthHmac } from "./hmacVerify.ts";
 import { persistShopifyInstallToken } from "./persistInstallToken.ts";
-
-/**
- * OAuth completion is handled on the SPA `/refund` route (`useRefundShopifyOAuthReturnParams`).
- * If `SHOPIFY_OAUTH_RETURN_URL` is only the site origin (pathname `/`), query params would
- * land on `/` and are lost when the user opens Refund.
- */
-function oauthReturnTargetUrl(returnUrlRaw: string): URL {
-  const u = new URL(returnUrlRaw.trim());
-  const path = u.pathname.replace(/\/+$/, "") || "/";
-  if (path === "/") {
-    u.pathname = "/refund";
-    u.hash = "";
-  } else {
-    u.pathname = path;
-  }
-  return u;
-}
-
-function redirect(returnUrl: string, params: Record<string, string>): Response {
-  const u = oauthReturnTargetUrl(returnUrl);
-  for (const [k, v] of Object.entries(params)) {
-    u.searchParams.set(k, v);
-  }
-  return Response.redirect(u.toString(), 302);
-}
+import { oauthDebugLog } from "./oauthDebugLog.ts";
+import { spaOAuthErrorRedirect, spaRedirect } from "./callbackSpaRedirect.ts";
 
 export async function handleCallback(req: Request): Promise<Response> {
   const returnUrl = Deno.env.get("SHOPIFY_OAUTH_RETURN_URL");
@@ -41,17 +18,30 @@ export async function handleCallback(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const sp = url.searchParams;
 
+  oauthDebugLog("callback_request", {
+    configured_shopify_oauth_return_url: returnUrl,
+    request_shop: sp.get("shop"),
+    has_oauth_state: sp.has("state"),
+    has_code: sp.has("code"),
+    oauth_error_param: sp.get("error"),
+  });
+
   const oauthError = sp.get("error");
   if (oauthError) {
     const desc = sp.get("error_description") || oauthError;
-    return redirect(returnUrl, { shopify_oauth: "error", reason: desc.slice(0, 500) });
+    return spaOAuthErrorRedirect(returnUrl, desc.slice(0, 500), {
+      phase: "shopify_authorize_error",
+      shop: sp.get("shop"),
+      oauthState: sp.get("state"),
+    });
   }
 
   const okHmac = await verifyShopifyOAuthHmac(sp, clientSecret);
   if (!okHmac) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "Invalid HMAC",
+    return spaOAuthErrorRedirect(returnUrl, "Invalid HMAC", {
+      phase: "callback_hmac_invalid",
+      shop: sp.get("shop"),
+      oauthState: sp.get("state"),
     });
   }
 
@@ -59,17 +49,19 @@ export async function handleCallback(req: Request): Promise<Response> {
   const state = sp.get("state");
   const shopParam = sp.get("shop");
   if (!code || !state || !shopParam) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "Missing OAuth parameters",
+    return spaOAuthErrorRedirect(returnUrl, "Missing OAuth parameters", {
+      phase: "callback_missing_params",
+      shop: shopParam,
+      oauthState: state,
     });
   }
 
   const shopHost = shopParam.replace(/^https?:\/\//i, "").split("/")[0].toLowerCase();
   if (!shopHost.endsWith(".myshopify.com")) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "Invalid shop",
+    return spaOAuthErrorRedirect(returnUrl, "Invalid shop", {
+      phase: "callback_invalid_shop_host",
+      shop: shopHost,
+      oauthState: state,
     });
   }
 
@@ -81,32 +73,37 @@ export async function handleCallback(req: Request): Promise<Response> {
     .maybeSingle();
 
   if (rowErr || !row) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "Invalid or unknown state",
+    return spaOAuthErrorRedirect(returnUrl, "Invalid or unknown state", {
+      phase: "callback_state_not_found",
+      shop: shopHost,
+      oauthState: state,
     });
   }
 
   if (row.consumed_at) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "OAuth state already used",
+    return spaOAuthErrorRedirect(returnUrl, "OAuth state already used", {
+      phase: "callback_state_consumed",
+      shop: shopHost,
+      oauthState: state,
     });
   }
 
   const expires = new Date(String(row.expires_at)).getTime();
   if (!Number.isFinite(expires) || Date.now() > expires) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "OAuth link expired; try again",
+    return spaOAuthErrorRedirect(returnUrl, "OAuth link expired; try again", {
+      phase: "callback_state_expired",
+      shop: shopHost,
+      oauthState: state,
     });
   }
 
   const expectedShop = String(row.shop_domain).toLowerCase();
   if (shopHost !== expectedShop) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "Shop does not match authorization",
+    return spaOAuthErrorRedirect(returnUrl, "Shop does not match authorization", {
+      phase: "callback_shop_mismatch",
+      shop: shopHost,
+      oauthState: state,
+      claimNonce: row.pending_claim_nonce as string | null | undefined,
     });
   }
 
@@ -131,11 +128,24 @@ export async function handleCallback(req: Request): Promise<Response> {
       tokenJson.error_description ||
       tokenJson.error ||
       `Token exchange failed (${tokenRes.status})`;
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: msg.slice(0, 500),
+    oauthDebugLog("callback_token_exchange_failed", {
+      shopify_admin_url: `https://${shopHost}`,
+      oauth_state: state,
+      status: tokenRes.status,
+    });
+    return spaOAuthErrorRedirect(returnUrl, msg.slice(0, 500), {
+      phase: "callback_token_exchange_failed",
+      shop: shopHost,
+      oauthState: state,
     });
   }
+
+  oauthDebugLog("callback_after_token_exchange", {
+    shopify_admin_url: `https://${shopHost}`,
+    oauth_state: state,
+    flow: (row.user_id as string | null) ? "signed_in_user" : "pending_claim_install",
+    install_pending_claim_nonce: row.pending_claim_nonce as string | null | undefined,
+  });
 
   const userId = row.user_id as string | null;
   await admin.from("shopify_oauth_states").update({ consumed_at: new Date().toISOString() }).eq(
@@ -149,9 +159,10 @@ export async function handleCallback(req: Request): Promise<Response> {
     tokenJson.access_token
   );
   if (!installSaved.ok) {
-    return redirect(returnUrl, {
-      shopify_oauth: "error",
-      reason: "Could not persist install token",
+    return spaOAuthErrorRedirect(returnUrl, "Could not persist install token", {
+      phase: "callback_persist_install_token_failed",
+      shop: shopHost,
+      oauthState: state,
     });
   }
 
@@ -170,9 +181,10 @@ export async function handleCallback(req: Request): Promise<Response> {
       .single();
 
     if (upErr) {
-      return redirect(returnUrl, {
-        shopify_oauth: "error",
-        reason: "Could not save credentials",
+      return spaOAuthErrorRedirect(returnUrl, "Could not save credentials", {
+        phase: "callback_save_credentials_failed",
+        shop: shopHost,
+        oauthState: state,
       });
     }
 
@@ -183,7 +195,11 @@ export async function handleCallback(req: Request): Promise<Response> {
     if (credRow?.id) {
       signedInParams.shopify_connection_id = String(credRow.id);
     }
-    return redirect(returnUrl, signedInParams);
+    return spaRedirect(returnUrl, signedInParams, {
+      phase: "callback_success_signed_in",
+      shop: shopHost,
+      oauthState: state,
+    });
   } else {
     const pendingExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const fromState = row.pending_claim_nonce as string | null | undefined;
@@ -202,16 +218,33 @@ export async function handleCallback(req: Request): Promise<Response> {
     );
 
     if (pendErr) {
-      return redirect(returnUrl, {
-        shopify_oauth: "error",
-        reason: "Could not store install token",
+      return spaOAuthErrorRedirect(returnUrl, "Could not store install token", {
+        phase: "callback_pending_upsert_failed",
+        shop: shopHost,
+        oauthState: state,
+        claimNonce,
       });
     }
 
-    return redirect(returnUrl, {
-      shopify_oauth: "success",
-      shop: shopHost,
-      shopify_claim: claimNonce,
+    oauthDebugLog("callback_pending_claim_ready", {
+      shopify_admin_url: `https://${shopHost}`,
+      oauth_state: state,
+      claim_nonce: claimNonce,
     });
+
+    return spaRedirect(
+      returnUrl,
+      {
+        shopify_oauth: "success",
+        shop: shopHost,
+        shopify_claim: claimNonce,
+      },
+      {
+        phase: "callback_success_pending_claim",
+        shop: shopHost,
+        oauthState: state,
+        claimNonce,
+      }
+    );
   }
 }

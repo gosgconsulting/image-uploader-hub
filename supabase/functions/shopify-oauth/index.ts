@@ -4,6 +4,7 @@ import { handleInstallEntry } from "./installEntry.ts";
 import { handleClaim } from "./claim.ts";
 import { handleBeginManualOAuth } from "./beginManualOAuth.ts";
 import { corsHeaders } from "./cors.ts";
+import { oauthDebugLog } from "./oauthDebugLog.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -13,6 +14,13 @@ serve(async (req) => {
   const url = new URL(req.url);
 
   if (req.method === "GET" && url.searchParams.has("code")) {
+    oauthDebugLog("route_oauth_callback", {
+      shopify_admin_url: url.searchParams.get("shop")
+        ? `https://${String(url.searchParams.get("shop")).replace(/^https?:\/\//i, "").split("/")[0]}`
+        : null,
+      has_oauth_state: url.searchParams.has("state"),
+      has_code: true,
+    });
     return handleCallback(req);
   }
 
@@ -22,6 +30,12 @@ serve(async (req) => {
     url.searchParams.has("hmac") &&
     url.searchParams.has("timestamp")
   ) {
+    const shopRaw = url.searchParams.get("shop") ?? "";
+    const host = shopRaw.replace(/^https?:\/\//i, "").split("/")[0].toLowerCase();
+    oauthDebugLog("route_install_entry", {
+      shopify_admin_url: host ? `https://${host}` : null,
+      shop_param: shopRaw,
+    });
     return handleInstallEntry(req);
   }
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DollarSign, Plus, Loader2 } from "lucide-react";
 import { RefundTable } from "@/components/RefundTable";
@@ -16,6 +16,17 @@ import { useRefundBulkSelection } from "@/pages/refund/useRefundBulkSelection";
 export default function Refund() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    console.log(
+      JSON.stringify({
+        source: "[refund-page]",
+        event: "refund_mount",
+        current_url: typeof window !== "undefined" ? window.location.href : null,
+        search_from_router: searchParams.toString(),
+      })
+    );
+  }, [searchParams]);
   const {
     shopifyShop,
     setShopifyShop,

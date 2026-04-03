@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { verifyShopifyOAuthHmac } from "./hmacVerify.ts";
 import { randomStateToken } from "./oauthCrypto.ts";
+import { oauthDebugLog } from "./oauthDebugLog.ts";
 
 /**
  * Shopify loads the app URL after install with ?shop=&timestamp=&hmac=
@@ -67,6 +68,13 @@ export async function handleInstallEntry(req: Request): Promise<Response> {
     `&scope=${encodeURIComponent(scopes)}` +
     `&redirect_uri=${redirectUri}` +
     `&state=${encodeURIComponent(state)}`;
+
+  oauthDebugLog("install_entry_redirect_shopify_authorize", {
+    shopify_admin_url: `https://${host}`,
+    oauth_state: state,
+    claim_nonce: pendingClaimNonce,
+    redirect_url: authorizeUrl,
+  });
 
   return Response.redirect(authorizeUrl, 302);
 }

@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { randomStateToken } from "./oauthCrypto.ts";
 import { corsHeaders } from "./cors.ts";
+import { oauthDebugLog } from "./oauthDebugLog.ts";
 
 function json(res: unknown, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -75,6 +76,13 @@ export async function handleBeginManualOAuth(
     `&scope=${encodeURIComponent(scopes)}` +
     `&redirect_uri=${redirectUri}` +
     `&state=${encodeURIComponent(state)}`;
+
+  oauthDebugLog("begin_manual_oauth", {
+    shopify_admin_url: `https://${host}`,
+    oauth_state: state,
+    has_user_id: userId !== null,
+    redirect_url: authorizeUrl,
+  });
 
   return json({ authorize_url: authorizeUrl });
 }

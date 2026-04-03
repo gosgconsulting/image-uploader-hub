@@ -1,75 +1,21 @@
 import { useEffect, useLayoutEffect, type Dispatch, type SetStateAction } from "react";
 import type { SetURLSearchParams } from "react-router-dom";
 import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
-import { supabase } from "@/integrations/supabase/client";
-import { claimShopifyInstall } from "@/lib/shopifyOAuth";
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 import {
   LS_SHOPIFY_CONNECTION_ID,
   SHOPIFY_OAUTH_RETURN_PARAM_KEYS,
-  clearPendingClaimStorage,
   mergeShopifyOAuthParamsFromLocation,
-  writePendingClaimToDurableStorage,
-  writePendingClaimToSessionStorage,
 } from "@/pages/refund/shopifyRefundSessionKeys";
+import {
+  completeShopifyInstallClaimFlow,
+  refundOAuthDebugLog,
+} from "@/pages/refund/completeShopifyInstallClaimFlow";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ToastFn = (props: ToastProps & { action?: ToastActionElement }) => void;
-
-async function completeShopifyInstallClaimFlow(opts: {
-  claimNonce: string;
-  normalized: string;
-  toast: ToastFn;
-  setShopifyShop: Dispatch<SetStateAction<string>>;
-  setShopifyConnectionId: Dispatch<SetStateAction<string>>;
-}): Promise<void> {
-  const { claimNonce, normalized, toast, setShopifyShop, setShopifyConnectionId } = opts;
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    writePendingClaimToDurableStorage(claimNonce, normalized);
-    writePendingClaimToSessionStorage(claimNonce, normalized);
-    toast({
-      title: "Almost done",
-      description:
-        "Sign in on this site with the same browser. Your shop will link automatically for refunds.",
-    });
-    return;
-  }
-
-  const claimResult = await claimShopifyInstall({
-    claimNonce: claimNonce || undefined,
-    shop: normalized || undefined,
-  });
-
-  if (claimResult.ok) {
-    clearPendingClaimStorage();
-    if (claimResult.shop_domain) {
-      localStorage.setItem("shopify_shop", claimResult.shop_domain);
-      setShopifyShop(claimResult.shop_domain);
-    }
-    const cid = claimResult.credential_id?.trim() ?? "";
-    if (cid && UUID_RE.test(cid)) {
-      localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, cid);
-      setShopifyConnectionId(cid);
-    }
-    toast({
-      title: "Shopify linked",
-      description:
-        "Install finished. This shop is tied to your account for server-side refunds.",
-    });
-  } else {
-    toast({
-      title: "Finish linking",
-      description: "error" in claimResult ? claimResult.error : "Unknown error",
-      variant: "destructive",
-    });
-  }
-}
 
 /**
  * Handles `?shopify_oauth=...` after Shopify redirects to Refund, and bare
@@ -96,6 +42,10 @@ export function useRefundShopifyOAuthReturnParams(
       }
     }
     if (changed) {
+      refundOAuthDebugLog("router_synced_oauth_params_from_location", {
+        current_url: window.location.href,
+        merged_search: next.toString(),
+      });
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -108,6 +58,15 @@ export function useRefundShopifyOAuthReturnParams(
     const reason = merged.get("reason") ?? "";
     const shop = merged.get("shop") ?? "";
     const claimNonce = merged.get("shopify_claim") ?? "";
+    refundOAuthDebugLog("oauth_query_detected", {
+      shopify_oauth: o,
+      current_url: typeof window !== "undefined" ? window.location.href : null,
+      redirect_url_effective: typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}${window.location.search}` : null,
+      shop,
+      shopify_admin_url: shop ? `https://${shop}` : null,
+      claim_nonce: claimNonce || null,
+      reason: o === "error" ? reason : undefined,
+    });
     const connectionIdRaw = merged.get("shopify_connection_id")?.trim() ?? "";
     const normalized = shop ? normalizeShopDomain(shop) : "";
 
@@ -205,6 +164,13 @@ export function useRefundShopifyOAuthReturnParams(
 
     const normalized = normalizeShopDomain(shop);
     if (!normalized.endsWith(".myshopify.com")) return;
+
+    refundOAuthDebugLog("bare_claim_query_detected", {
+      current_url: typeof window !== "undefined" ? window.location.href : null,
+      shop: normalized,
+      shopify_admin_url: `https://${normalized}`,
+      claim_nonce: claimNonce,
+    });
 
     const clearBareParams = () => {
       setSearchParams((prev) => {
