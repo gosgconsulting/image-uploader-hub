@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   fetchShopifyCredential,
   isShopifyCredentialsSupabasePersistenceEnabled,
+  shouldLoadShopifyCredentialsFromSupabase,
   upsertShopifyCredential,
 } from "@/lib/shopify-credentials";
 import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
@@ -103,7 +104,7 @@ export function useRefundShopifySession() {
       if (row?.id) {
         localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, row.id);
         setShopifyConnectionId(row.id);
-      } else {
+      } else if (shouldLoadShopifyCredentialsFromSupabase()) {
         localStorage.removeItem(LS_SHOPIFY_CONNECTION_ID);
         setShopifyConnectionId("");
       }

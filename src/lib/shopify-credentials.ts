@@ -17,8 +17,11 @@ export function isShopifyCredentialsSupabasePersistenceEnabled(): boolean {
   return parseSaveShopifyCredentialsEnv(import.meta.env.VITE_SAVE_SHOPIFY_CREDENTIALS);
 }
 
-/** Read tokens written by OAuth claim or manual save (RLS: own rows only). */
-function shouldLoadShopifyCredentialsFromSupabase(): boolean {
+/**
+ * When false, `fetchShopifyCredential` does not query Supabase (env disables reads).
+ * Hydration must not treat a null fetch as “no credentials” or it will wipe IDs set by OAuth claim.
+ */
+export function shouldLoadShopifyCredentialsFromSupabase(): boolean {
   return (
     isShopifyCredentialsSupabasePersistenceEnabled() || isShopifyOAuthEnabled()
   );

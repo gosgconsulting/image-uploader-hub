@@ -6,14 +6,37 @@ import {
   LS_SHOPIFY_CONNECTION_ID,
   SHOPIFY_OAUTH_RETURN_PARAM_KEYS,
   mergeShopifyOAuthParamsFromLocation,
-} from "@/pages/refund/shopifyRefundSessionKeys";
+} from "./shopifyRefundSessionKeys";
 import {
   completeShopifyInstallClaimFlow,
   refundOAuthDebugLog,
-} from "@/pages/refund/completeShopifyInstallClaimFlow";
+  writePendingClaimToDurableStorage,
+} from "./completeShopifyInstallClaimFlow";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Ignore stale locks (crashed tab / killed process) so the next visit can claim. Legacy value `"1"` parses as a tiny timestamp and expires immediately. */
+const OAUTH_PROC_LOCK_TTL_MS = 120_000;
+
+function isRefundOAuthLockBusy(lockKey: string): boolean {
+  try {
+    const raw = sessionStorage.getItem(lockKey);
+    if (!raw) return false;
+    const started = parseInt(raw, 10);
+    if (!Number.isFinite(started)) {
+      sessionStorage.removeItem(lockKey);
+      return false;
+    }
+    if (Date.now() - started > OAUTH_PROC_LOCK_TTL_MS) {
+      sessionStorage.removeItem(lockKey);
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 type ToastFn = (props: ToastProps & { action?: ToastActionElement }) => void;
 
@@ -111,11 +134,12 @@ export function useRefundShopifyOAuthReturnParams(
     const lockKey = claimNonce
       ? `oauth_proc_nonce:${claimNonce}`
       : `oauth_proc_shop:${normalized}`;
-    if (sessionStorage.getItem(lockKey)) {
+    if (isRefundOAuthLockBusy(lockKey)) {
+      refundOAuthDebugLog("oauth_query_skipped_in_flight_lock", { lock_key: lockKey });
       clearOAuthParams();
       return;
     }
-    sessionStorage.setItem(lockKey, "1");
+    sessionStorage.setItem(lockKey, String(Date.now()));
 
     if (claimNonce && UUID_RE.test(claimNonce)) {
       writePendingClaimToDurableStorage(claimNonce, normalized);
@@ -182,11 +206,12 @@ export function useRefundShopifyOAuthReturnParams(
     };
 
     const lockKey = `oauth_proc_nonce:${claimNonce}`;
-    if (sessionStorage.getItem(lockKey)) {
+    if (isRefundOAuthLockBusy(lockKey)) {
+      refundOAuthDebugLog("bare_claim_skipped_in_flight_lock", { lock_key: lockKey });
       clearBareParams();
       return;
     }
-    sessionStorage.setItem(lockKey, "1");
+    sessionStorage.setItem(lockKey, String(Date.now()));
 
     writePendingClaimToDurableStorage(claimNonce, normalized);
 
