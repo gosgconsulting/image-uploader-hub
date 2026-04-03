@@ -2,7 +2,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8
 import { verifyShopifySessionToken } from "./verifyShopifySessionToken.ts";
 
 export type ResolvedAccess =
-  | { ok: true; accessToken: string }
+  | { ok: true; accessToken: string; credentialId: string | null }
   | { ok: false; status: number; error: string };
 
 function jwtHeaderAlg(bearer: string): string | null {
@@ -53,7 +53,11 @@ export async function resolveRefundAccessToken(
           "No install token for this shop. Open the app from Shopify Admin once to complete OAuth.",
       };
     }
-    return { ok: true, accessToken: install.access_token as string };
+    return {
+      ok: true,
+      accessToken: install.access_token as string,
+      credentialId: null,
+    };
   }
 
   const {
@@ -67,12 +71,12 @@ export async function resolveRefundAccessToken(
 
   const { data: cred, error: credErr } = await admin
     .from("shopify_credentials")
-    .select("access_token")
+    .select("id, access_token")
     .eq("user_id", user.id)
     .eq("shop_domain", normalizedShop)
     .maybeSingle();
 
-  if (credErr || !cred?.access_token) {
+  if (credErr || !cred?.access_token || !cred.id) {
     return {
       ok: false,
       status: 400,
@@ -80,5 +84,9 @@ export async function resolveRefundAccessToken(
     };
   }
 
-  return { ok: true, accessToken: cred.access_token as string };
+  return {
+    ok: true,
+    accessToken: cred.access_token as string,
+    credentialId: cred.id as string,
+  };
 }

@@ -78,7 +78,7 @@ export default function Refund() {
     dateSort,
     setDateSort,
     handleClearFilters,
-  } = useRefundRecords(shopifyShop, shopifyToken);
+  } = useRefundRecords(shopifyShop, shopifyToken, shopifyConnectionId);
 
   const {
     selectedRefundIds,

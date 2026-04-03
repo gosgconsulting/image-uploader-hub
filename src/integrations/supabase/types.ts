@@ -144,6 +144,8 @@ export type Database = {
           shopify_refund_id: string | null
           shopify_refund_error: string | null
           shopify_refund_attempted_at: string | null
+          shopify_credential_id: string | null
+          shop_domain: string | null
           created_at: string
           updated_at: string
         }
@@ -172,6 +174,8 @@ export type Database = {
           shopify_refund_id?: string | null
           shopify_refund_error?: string | null
           shopify_refund_attempted_at?: string | null
+          shopify_credential_id?: string | null
+          shop_domain?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -200,6 +204,8 @@ export type Database = {
           shopify_refund_id?: string | null
           shopify_refund_error?: string | null
           shopify_refund_attempted_at?: string | null
+          shopify_credential_id?: string | null
+          shop_domain?: string | null
           created_at?: string
           updated_at?: string
         }

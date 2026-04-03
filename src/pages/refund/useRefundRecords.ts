@@ -32,7 +32,11 @@ function needsShopifyEnrichment(r: Refund): boolean {
   );
 }
 
-export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
+export function useRefundRecords(
+  shopifyShop: string,
+  shopifyToken: string,
+  shopifyCredentialId: string
+) {
   const [refunds, setRefunds] = useState<Refund[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(true);
@@ -44,7 +48,7 @@ export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
   const loadRefunds = useCallback(async () => {
     setIsLoadingList(true);
     setLoadError(null);
-    const { data, error } = await fetchRefunds();
+    const { data, error } = await fetchRefunds(shopifyCredentialId.trim() || null);
     setIsLoadingList(false);
     if (error) {
       setLoadError(error.message);
@@ -56,7 +60,7 @@ export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
       return;
     }
     setRefunds(data);
-  }, [toast]);
+  }, [toast, shopifyCredentialId]);
 
   useEffect(() => {
     void loadRefunds();
@@ -143,7 +147,10 @@ export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
 
   const handleImported = useCallback(
     async (rows: Refund[]) => {
-      const { error } = await insertRefunds(rows);
+      const { error } = await insertRefunds(rows, {
+        shopifyCredentialId: shopifyCredentialId.trim(),
+        shopDomain: shopifyShop.trim(),
+      });
       if (error) {
         toast({
           title: "Could not save import",
@@ -155,7 +162,7 @@ export function useRefundRecords(shopifyShop: string, shopifyToken: string) {
       setRefunds((prev) => [...rows, ...prev]);
       void enrichImportedRefunds(rows);
     },
-    [enrichImportedRefunds, toast]
+    [enrichImportedRefunds, toast, shopifyCredentialId, shopifyShop]
   );
 
   const filteredAndSortedRefunds = useMemo(() => {

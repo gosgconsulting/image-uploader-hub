@@ -66,7 +66,7 @@ serve(async (req) => {
   if (!resolved.ok) {
     return json({ error: resolved.error }, resolved.status);
   }
-  const accessToken = resolved.accessToken;
+  const { accessToken, credentialId } = resolved;
   const results: Array<{
     id: string;
     ok: boolean;
@@ -76,13 +76,18 @@ serve(async (req) => {
   }> = [];
 
   for (const refundId of refundIds) {
-    const { data: row, error: rowErr } = await admin
+    let rowQuery = admin
       .from("refunds")
       .select(
         "id, status, shopify_numeric_order_id, calculated_refund, shopify_refund_id, reason_of_return"
       )
-      .eq("id", refundId)
-      .maybeSingle();
+      .eq("id", refundId);
+    if (credentialId) {
+      rowQuery = rowQuery.eq("shopify_credential_id", credentialId);
+    } else {
+      rowQuery = rowQuery.eq("shop_domain", normalizedShop);
+    }
+    const { data: row, error: rowErr } = await rowQuery.maybeSingle();
 
     if (rowErr || !row) {
       results.push({ id: refundId, ok: false, error: "Refund row not found" });

@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import type { Refund } from "@/types/refund";
+import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
 import type { Product } from "@/utils/refundCalculation";
 
 type RefundRow = TablesInsert<"refunds">;
@@ -65,7 +66,10 @@ export function rowToRefund(row: Tables<"refunds">): Refund {
   };
 }
 
-export function refundToInsert(r: Refund): RefundRow {
+export function refundToInsert(
+  r: Refund,
+  scope: { shopifyCredentialId: string; shopDomain: string }
+): RefundRow {
   return {
     id: r.id,
     date: r.date,
@@ -91,6 +95,8 @@ export function refundToInsert(r: Refund): RefundRow {
     shopify_refund_id: r.shopifyRefundId ?? null,
     shopify_refund_error: r.shopifyRefundError ?? null,
     shopify_refund_attempted_at: r.shopifyRefundAttemptedAt ?? null,
+    shopify_credential_id: scope.shopifyCredentialId,
+    shop_domain: scope.shopDomain,
   };
 }
 
@@ -138,10 +144,18 @@ function partialToUpdate(updates: Partial<Refund>): TablesUpdate<"refunds"> {
   return row;
 }
 
-export async function fetchRefunds(): Promise<{ data: Refund[]; error: Error | null }> {
+export async function fetchRefunds(
+  shopifyCredentialId: string | null
+): Promise<{ data: Refund[]; error: Error | null }> {
+  const id = shopifyCredentialId?.trim() ?? "";
+  if (!id) {
+    return { data: [], error: null };
+  }
+
   const { data, error } = await supabase
     .from("refunds")
     .select("*")
+    .eq("shopify_credential_id", id)
     .order("date", { ascending: false });
 
   if (error) {
@@ -154,10 +168,25 @@ export async function fetchRefunds(): Promise<{ data: Refund[]; error: Error | n
 }
 
 export async function insertRefunds(
-  rows: Refund[]
+  rows: Refund[],
+  scope: { shopifyCredentialId: string; shopDomain: string }
 ): Promise<{ error: Error | null }> {
   if (rows.length === 0) return { error: null };
-  const payload = rows.map(refundToInsert);
+  const credId = scope.shopifyCredentialId.trim();
+  const shop = normalizeShopDomain(scope.shopDomain);
+  if (!credId) {
+    return {
+      error: new Error(
+        "Sign in and save this store's Shopify connection before importing refunds."
+      ),
+    };
+  }
+  if (!shop) {
+    return {
+      error: new Error("Configure your Shopify shop domain before importing refunds."),
+    };
+  }
+  const payload = rows.map((r) => refundToInsert(r, { shopifyCredentialId: credId, shopDomain: shop }));
   const { error } = await supabase.from("refunds").insert(payload);
   return { error: error ? new Error(error.message) : null };
 }
