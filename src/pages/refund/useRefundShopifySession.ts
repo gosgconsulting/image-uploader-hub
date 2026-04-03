@@ -32,6 +32,8 @@ export function useRefundShopifySession() {
   const [shopifyConnectionId, setShopifyConnectionId] = useState(
     () => localStorage.getItem(LS_SHOPIFY_CONNECTION_ID) || ""
   );
+  const [shopifyClaimBusy, setShopifyClaimBusy] = useState(false);
+  const [shopifyLinkSignInHintShop, setShopifyLinkSignInHintShop] = useState<string | null>(null);
   const { toast } = useToast();
 
   const { shopifyLiveConnectionStatus, shopifyLiveConnectionError } =
@@ -56,28 +58,13 @@ export function useRefundShopifySession() {
 
     const pendingNonce = readPendingClaimNonce();
     if (session && pendingNonce && !urlDrivesClaim) {
-      const claim = await claimShopifyInstall({ claimNonce: pendingNonce });
-      if (claim.ok) {
-        clearPendingClaimStorage();
-        if (claim.shop_domain) {
-          localStorage.setItem("shopify_shop", claim.shop_domain);
-          setShopifyShop(claim.shop_domain);
-        }
-        if (claim.credential_id) {
-          localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, claim.credential_id);
-          setShopifyConnectionId(claim.credential_id);
-        }
-        toast({
-          title: "Shopify linked",
-          description: "Your Admin install is now tied to this account for server-side refunds.",
-        });
-      }
-    } else if (session && !urlDrivesClaim) {
-      const pendingClaim = readPendingClaimShop();
-      if (pendingClaim) {
-        const claim = await claimShopifyInstall({ shop: pendingClaim });
+      setShopifyLinkSignInHintShop(null);
+      setShopifyClaimBusy(true);
+      try {
+        const claim = await claimShopifyInstall({ claimNonce: pendingNonce });
         if (claim.ok) {
           clearPendingClaimStorage();
+          setShopifyLinkSignInHintShop(null);
           if (claim.shop_domain) {
             localStorage.setItem("shopify_shop", claim.shop_domain);
             setShopifyShop(claim.shop_domain);
@@ -90,6 +77,35 @@ export function useRefundShopifySession() {
             title: "Shopify linked",
             description: "Your Admin install is now tied to this account for server-side refunds.",
           });
+        }
+      } finally {
+        setShopifyClaimBusy(false);
+      }
+    } else if (session && !urlDrivesClaim) {
+      const pendingClaim = readPendingClaimShop();
+      if (pendingClaim) {
+        setShopifyLinkSignInHintShop(null);
+        setShopifyClaimBusy(true);
+        try {
+          const claim = await claimShopifyInstall({ shop: pendingClaim });
+          if (claim.ok) {
+            clearPendingClaimStorage();
+            setShopifyLinkSignInHintShop(null);
+            if (claim.shop_domain) {
+              localStorage.setItem("shopify_shop", claim.shop_domain);
+              setShopifyShop(claim.shop_domain);
+            }
+            if (claim.credential_id) {
+              localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, claim.credential_id);
+              setShopifyConnectionId(claim.credential_id);
+            }
+            toast({
+              title: "Shopify linked",
+              description: "Your Admin install is now tied to this account for server-side refunds.",
+            });
+          }
+        } finally {
+          setShopifyClaimBusy(false);
         }
       }
     }
@@ -123,8 +139,25 @@ export function useRefundShopifySession() {
     toast,
     hydrateShopifySession,
     setShopifyShop,
-    setShopifyConnectionId
+    setShopifyConnectionId,
+    setShopifyClaimBusy,
+    setShopifyLinkSignInHintShop
   );
+
+  useEffect(() => {
+    void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const nonce = readPendingClaimNonce();
+      const shop = readPendingClaimShop().trim();
+      if (nonce && !session) {
+        setShopifyLinkSignInHintShop(shop || "your store");
+      } else if (!nonce) {
+        setShopifyLinkSignInHintShop(null);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     void hydrateShopifySession();
@@ -185,7 +218,8 @@ export function useRefundShopifySession() {
       } else if (!session && token.trim()) {
         toast({
           title: "Saved locally only",
-          description: "Sign in to store your Admin token for bulk Shopify refunds.",
+          description:
+            "No app session is active, so the token was not saved on the server. Add authentication (same browser) to enable server-side refunds, or keep using this device with the token in local storage.",
         });
       }
       return { serverSaved: false };
@@ -206,5 +240,7 @@ export function useRefundShopifySession() {
     shopifyEmbeddedContextActive,
     shopifyLiveConnectionStatus,
     shopifyLiveConnectionError,
+    shopifyClaimBusy,
+    shopifyLinkSignInHintShop,
   };
 }

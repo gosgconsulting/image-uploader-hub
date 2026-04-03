@@ -7,36 +7,12 @@ import {
   SHOPIFY_OAUTH_RETURN_PARAM_KEYS,
   mergeShopifyOAuthParamsFromLocation,
 } from "./shopifyRefundSessionKeys";
-import {
-  completeShopifyInstallClaimFlow,
-  refundOAuthDebugLog,
-  writePendingClaimToDurableStorage,
-} from "./completeShopifyInstallClaimFlow";
+import { refundOAuthDebugLog, writePendingClaimToDurableStorage } from "./completeShopifyInstallClaimFlow";
+import { runRefundOAuthInstallClaimSideEffects } from "./refundOAuthInstallClaimSideEffects";
+import { isRefundOAuthProcLockBusy, setRefundOAuthProcLock } from "./refundOAuthProcLock";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-/** Ignore stale locks (crashed tab / killed process) so the next visit can claim. Legacy value `"1"` parses as a tiny timestamp and expires immediately. */
-const OAUTH_PROC_LOCK_TTL_MS = 120_000;
-
-function isRefundOAuthLockBusy(lockKey: string): boolean {
-  try {
-    const raw = sessionStorage.getItem(lockKey);
-    if (!raw) return false;
-    const started = parseInt(raw, 10);
-    if (!Number.isFinite(started)) {
-      sessionStorage.removeItem(lockKey);
-      return false;
-    }
-    if (Date.now() - started > OAUTH_PROC_LOCK_TTL_MS) {
-      sessionStorage.removeItem(lockKey);
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 type ToastFn = (props: ToastProps & { action?: ToastActionElement }) => void;
 
@@ -50,7 +26,9 @@ export function useRefundShopifyOAuthReturnParams(
   toast: ToastFn,
   hydrateShopifySession: () => Promise<void>,
   setShopifyShop: Dispatch<SetStateAction<string>>,
-  setShopifyConnectionId: Dispatch<SetStateAction<string>>
+  setShopifyConnectionId: Dispatch<SetStateAction<string>>,
+  setShopifyClaimBusy: Dispatch<SetStateAction<boolean>>,
+  setShopifyLinkSignInHintShop: Dispatch<SetStateAction<string | null>>
 ) {
   useLayoutEffect(() => {
     const live =
@@ -134,12 +112,12 @@ export function useRefundShopifyOAuthReturnParams(
     const lockKey = claimNonce
       ? `oauth_proc_nonce:${claimNonce}`
       : `oauth_proc_shop:${normalized}`;
-    if (isRefundOAuthLockBusy(lockKey)) {
+    if (isRefundOAuthProcLockBusy(lockKey)) {
       refundOAuthDebugLog("oauth_query_skipped_in_flight_lock", { lock_key: lockKey });
       clearOAuthParams();
       return;
     }
-    sessionStorage.setItem(lockKey, String(Date.now()));
+    setRefundOAuthProcLock(lockKey);
 
     if (claimNonce && UUID_RE.test(claimNonce)) {
       writePendingClaimToDurableStorage(claimNonce, normalized);
@@ -154,21 +132,18 @@ export function useRefundShopifyOAuthReturnParams(
       setShopifyConnectionId(connectionIdRaw);
     }
 
-    void (async () => {
-      try {
-        await completeShopifyInstallClaimFlow({
-          claimNonce,
-          normalized,
-          toast,
-          setShopifyShop,
-          setShopifyConnectionId,
-        });
-      } finally {
-        sessionStorage.removeItem(lockKey);
-        clearOAuthParams();
-        void hydrateShopifySession();
-      }
-    })();
+    void runRefundOAuthInstallClaimSideEffects({
+      lockKey,
+      claimNonce,
+      normalized,
+      toast,
+      setShopifyShop,
+      setShopifyConnectionId,
+      setShopifyClaimBusy,
+      setShopifyLinkSignInHintShop,
+      afterClaim: clearOAuthParams,
+      hydrateShopifySession,
+    });
   }, [
     searchParams,
     setSearchParams,
@@ -176,6 +151,8 @@ export function useRefundShopifyOAuthReturnParams(
     hydrateShopifySession,
     setShopifyShop,
     setShopifyConnectionId,
+    setShopifyClaimBusy,
+    setShopifyLinkSignInHintShop,
   ]);
 
   useEffect(() => {
@@ -206,33 +183,30 @@ export function useRefundShopifyOAuthReturnParams(
     };
 
     const lockKey = `oauth_proc_nonce:${claimNonce}`;
-    if (isRefundOAuthLockBusy(lockKey)) {
+    if (isRefundOAuthProcLockBusy(lockKey)) {
       refundOAuthDebugLog("bare_claim_skipped_in_flight_lock", { lock_key: lockKey });
       clearBareParams();
       return;
     }
-    sessionStorage.setItem(lockKey, String(Date.now()));
+    setRefundOAuthProcLock(lockKey);
 
     writePendingClaimToDurableStorage(claimNonce, normalized);
 
     setShopifyShop(normalized);
     localStorage.setItem("shopify_shop", normalized);
 
-    void (async () => {
-      try {
-        await completeShopifyInstallClaimFlow({
-          claimNonce,
-          normalized,
-          toast,
-          setShopifyShop,
-          setShopifyConnectionId,
-        });
-      } finally {
-        sessionStorage.removeItem(lockKey);
-        clearBareParams();
-        void hydrateShopifySession();
-      }
-    })();
+    void runRefundOAuthInstallClaimSideEffects({
+      lockKey,
+      claimNonce,
+      normalized,
+      toast,
+      setShopifyShop,
+      setShopifyConnectionId,
+      setShopifyClaimBusy,
+      setShopifyLinkSignInHintShop,
+      afterClaim: clearBareParams,
+      hydrateShopifySession,
+    });
   }, [
     searchParams,
     setSearchParams,
@@ -240,5 +214,7 @@ export function useRefundShopifyOAuthReturnParams(
     hydrateShopifySession,
     setShopifyShop,
     setShopifyConnectionId,
+    setShopifyClaimBusy,
+    setShopifyLinkSignInHintShop,
   ]);
 }

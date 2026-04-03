@@ -22,13 +22,19 @@ export function refundOAuthDebugLog(event: string, data: Record<string, unknown>
 
 type ToastFn = (props: ToastProps & { action?: ToastActionElement }) => void;
 
+/** Returned so the Refund UI can show progress / “sign in to finish” instead of only toasts. */
+export type ShopifyInstallClaimFlowOutcome =
+  | "deferred_sign_in"
+  | "linked"
+  | "failed";
+
 export async function completeShopifyInstallClaimFlow(opts: {
   claimNonce: string;
   normalized: string;
   toast: ToastFn;
   setShopifyShop: Dispatch<SetStateAction<string>>;
   setShopifyConnectionId: Dispatch<SetStateAction<string>>;
-}): Promise<void> {
+}): Promise<ShopifyInstallClaimFlowOutcome> {
   const { claimNonce, normalized, toast, setShopifyShop, setShopifyConnectionId } = opts;
   refundOAuthDebugLog("claim_flow_start", {
     claim_nonce: claimNonce || null,
@@ -53,7 +59,7 @@ export async function completeShopifyInstallClaimFlow(opts: {
       description:
         "Sign in on this site with the same browser. Your shop will link automatically for refunds.",
     });
-    return;
+    return "deferred_sign_in";
   }
 
   const claimResult = await claimShopifyInstall({
@@ -84,6 +90,7 @@ export async function completeShopifyInstallClaimFlow(opts: {
       description:
         "Install finished. This shop is tied to your account for server-side refunds.",
     });
+    return "linked";
   } else {
     refundOAuthDebugLog("claim_flow_failed", {
       error: "error" in claimResult ? claimResult.error : "Unknown error",
@@ -95,5 +102,6 @@ export async function completeShopifyInstallClaimFlow(opts: {
       description: "error" in claimResult ? claimResult.error : "Unknown error",
       variant: "destructive",
     });
+    return "failed";
   }
 }

@@ -37,6 +37,8 @@ export default function Refund() {
     shopifyEmbeddedContextActive,
     shopifyLiveConnectionStatus,
     shopifyLiveConnectionError,
+    shopifyClaimBusy,
+    shopifyLinkSignInHintShop,
   } = useRefundShopifySession();
 
   const embeddedHost = shopifyEmbeddedContextActive
@@ -134,6 +136,31 @@ export default function Refund() {
             )}
           </div>
         </div>
+
+        {shopifyClaimBusy ? (
+          <Alert className="mb-6 border-primary/40 bg-primary/5">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <AlertTitle className="font-mono text-sm">Linking Shopify</AlertTitle>
+            <AlertDescription className="text-sm text-muted-foreground">
+              Verifying your account and saving this store&apos;s connection for server-side refunds.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {!shopifyClaimBusy && shopifyLinkSignInHintShop ? (
+          <Alert className="mb-6">
+            <AlertTitle className="font-mono text-sm">Shopify install not saved to the server yet</AlertTitle>
+            <AlertDescription className="text-sm text-muted-foreground">
+              OAuth data for{" "}
+              <span className="font-mono text-foreground">{shopifyLinkSignInHintShop}</span> is only
+              stored in this browser. Saving it for server-side refunds needs an authenticated session
+              in this browser—if this deployment does not use app login, use{" "}
+              <span className="text-foreground">Shopify settings</span> and paste your Admin API token
+              instead (local only without a session). When a session is available, reload this page
+              and linking will complete automatically.
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {shopifyLiveConnectionStatus === "failed" && shopifyLiveConnectionError ? (
           <Alert variant="destructive" className="mb-6">
