@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { ImportTable } from "@/components/ImportTable";
 import { NewImportDialog } from "@/components/NewImportDialog";
 import { WebhookSettings } from "@/components/WebhookSettings";
 import { supabase } from "@/integrations/supabase/client";
+import { mergeShopifyOAuthParamsFromLocation } from "@/pages/refund/shopifyRefundSessionKeys";
 
 interface ImportImage {
   id: string;
@@ -29,15 +30,16 @@ export default function Index() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (searchParams.has("shopify_oauth")) {
-      navigate({ pathname: "/refund", search: `?${searchParams.toString()}` }, { replace: true });
+  useLayoutEffect(() => {
+    const merged = mergeShopifyOAuthParamsFromLocation(searchParams);
+    if (merged.has("shopify_oauth")) {
+      navigate({ pathname: "/refund", search: `?${merged.toString()}` }, { replace: true });
       return;
     }
-    const claim = searchParams.get("shopify_claim")?.trim() ?? "";
-    const shop = searchParams.get("shop")?.trim() ?? "";
+    const claim = merged.get("shopify_claim")?.trim() ?? "";
+    const shop = merged.get("shop")?.trim() ?? "";
     if (claim && shop && SHOPIFY_CLAIM_UUID_RE.test(claim)) {
-      navigate({ pathname: "/refund", search: `?${searchParams.toString()}` }, { replace: true });
+      navigate({ pathname: "/refund", search: `?${merged.toString()}` }, { replace: true });
     }
   }, [searchParams, navigate]);
 

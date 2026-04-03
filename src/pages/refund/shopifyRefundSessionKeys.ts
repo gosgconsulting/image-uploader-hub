@@ -1,3 +1,30 @@
+/** Query keys returned on `SHOPIFY_OAUTH_RETURN_URL` after Supabase `shopify-oauth` callback. */
+export const SHOPIFY_OAUTH_RETURN_PARAM_KEYS = [
+  "shopify_oauth",
+  "shop",
+  "shopify_claim",
+  "reason",
+  "shopify_connection_id",
+] as const;
+
+/**
+ * Some hosts / first-paint timing leave `window.location.search` populated while
+ * `useSearchParams()` is still empty. Merge so Refund can claim the install nonce.
+ */
+export function mergeShopifyOAuthParamsFromLocation(
+  fromRouter: URLSearchParams
+): URLSearchParams {
+  const merged = new URLSearchParams(fromRouter);
+  if (typeof window === "undefined") return merged;
+  const live = new URLSearchParams(window.location.search);
+  for (const k of SHOPIFY_OAUTH_RETURN_PARAM_KEYS) {
+    if (!merged.has(k) && live.has(k)) {
+      merged.set(k, live.get(k)!);
+    }
+  }
+  return merged;
+}
+
 /** Keys for linking Shopify OAuth to a signed-in Supabase user (session + local for durability). */
 export const SS_SHOPIFY_CLAIM_NONCE = "shopify_pending_claim_nonce";
 export const SS_SHOPIFY_CLAIM_SHOP = "shopify_pending_claim_shop";

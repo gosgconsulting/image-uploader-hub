@@ -15,6 +15,7 @@ import { useRefundShopifyOAuthReturnParams } from "@/pages/refund/useRefundShopi
 import {
   LS_SHOPIFY_CONNECTION_ID,
   clearPendingClaimStorage,
+  mergeShopifyOAuthParamsFromLocation,
   readPendingClaimNonce,
   readPendingClaimShop,
 } from "@/pages/refund/shopifyRefundSessionKeys";
@@ -47,9 +48,10 @@ export function useRefundShopifySession() {
       setShopifyConnectionId("");
     }
 
+    const effectiveSearch = mergeShopifyOAuthParamsFromLocation(searchParams);
     const urlDrivesClaim =
-      searchParams.has("shopify_oauth") ||
-      (searchParams.has("shopify_claim") && searchParams.has("shop"));
+      effectiveSearch.has("shopify_oauth") ||
+      (effectiveSearch.has("shopify_claim") && effectiveSearch.has("shop"));
 
     const pendingNonce = readPendingClaimNonce();
     if (session && pendingNonce && !urlDrivesClaim) {

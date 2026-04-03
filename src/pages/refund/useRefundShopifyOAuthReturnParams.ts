@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useLayoutEffect, type Dispatch, type SetStateAction } from "react";
 import type { SetURLSearchParams } from "react-router-dom";
 import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
 import { supabase } from "@/integrations/supabase/client";
@@ -6,7 +6,9 @@ import { claimShopifyInstall } from "@/lib/shopifyOAuth";
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 import {
   LS_SHOPIFY_CONNECTION_ID,
+  SHOPIFY_OAUTH_RETURN_PARAM_KEYS,
   clearPendingClaimStorage,
+  mergeShopifyOAuthParamsFromLocation,
   writePendingClaimToDurableStorage,
   writePendingClaimToSessionStorage,
 } from "@/pages/refund/shopifyRefundSessionKeys";
@@ -81,14 +83,32 @@ export function useRefundShopifyOAuthReturnParams(
   setShopifyShop: Dispatch<SetStateAction<string>>,
   setShopifyConnectionId: Dispatch<SetStateAction<string>>
 ) {
+  useLayoutEffect(() => {
+    const live =
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    if (!live) return;
+    const next = new URLSearchParams(searchParams);
+    let changed = false;
+    for (const k of SHOPIFY_OAUTH_RETURN_PARAM_KEYS) {
+      if (!next.has(k) && live.has(k)) {
+        next.set(k, live.get(k)!);
+        changed = true;
+      }
+    }
+    if (changed) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
   useEffect(() => {
-    const o = searchParams.get("shopify_oauth");
+    const merged = mergeShopifyOAuthParamsFromLocation(searchParams);
+    const o = merged.get("shopify_oauth");
     if (!o) return;
 
-    const reason = searchParams.get("reason") ?? "";
-    const shop = searchParams.get("shop") ?? "";
-    const claimNonce = searchParams.get("shopify_claim") ?? "";
-    const connectionIdRaw = searchParams.get("shopify_connection_id")?.trim() ?? "";
+    const reason = merged.get("reason") ?? "";
+    const shop = merged.get("shop") ?? "";
+    const claimNonce = merged.get("shopify_claim") ?? "";
+    const connectionIdRaw = merged.get("shopify_connection_id")?.trim() ?? "";
     const normalized = shop ? normalizeShopDomain(shop) : "";
 
     const clearOAuthParams = () => {
@@ -176,10 +196,11 @@ export function useRefundShopifyOAuthReturnParams(
   ]);
 
   useEffect(() => {
-    if (searchParams.get("shopify_oauth")) return;
+    const merged = mergeShopifyOAuthParamsFromLocation(searchParams);
+    if (merged.get("shopify_oauth")) return;
 
-    const claimNonce = searchParams.get("shopify_claim")?.trim() ?? "";
-    const shop = searchParams.get("shop")?.trim() ?? "";
+    const claimNonce = merged.get("shopify_claim")?.trim() ?? "";
+    const shop = merged.get("shop")?.trim() ?? "";
     if (!claimNonce || !shop || !UUID_RE.test(claimNonce)) return;
 
     const normalized = normalizeShopDomain(shop);
