@@ -229,7 +229,18 @@ export function RefundTable({
                 <TableCell className="text-sm font-mono text-xs">
                   {refund.source}
                 </TableCell>
-                <TableCell className="text-sm">{refund.customer}</TableCell>
+                <TableCell className="text-sm">
+                  {refund.shopifyFetchStatus === "loading" ? (
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      …
+                    </span>
+                  ) : refund.shopifyFetchStatus === "error" ? (
+                    <span className="text-destructive text-[11px]">—</span>
+                  ) : (
+                    refund.customer
+                  )}
+                </TableCell>
                 <TableCell className="font-mono text-xs">
                   {format(new Date(refund.orderDate), "MMM dd, yyyy")}
                 </TableCell>

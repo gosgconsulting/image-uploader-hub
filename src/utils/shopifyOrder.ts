@@ -111,6 +111,21 @@ interface ShopifyLineItem {
   quantity: number;
 }
 
+/** Subset of REST Admin `Order` fields used to show a human-readable customer in the refund list. */
+interface ShopifyOrderCustomerShape {
+  customer?: {
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+  } | null;
+  email?: string | null;
+  contact_email?: string | null;
+  billing_address?: {
+    first_name?: string | null;
+    last_name?: string | null;
+  } | null;
+}
+
 interface ShopifyOrderResponse {
   order?: {
     id: number;
@@ -118,7 +133,31 @@ interface ShopifyOrderResponse {
     subtotal_price?: string;
     total_price?: string;
     currency?: string;
-  };
+  } & ShopifyOrderCustomerShape;
+}
+
+function customerDisplayNameFromShopifyOrder(
+  order: ShopifyOrderCustomerShape
+): string | undefined {
+  const c = order.customer;
+  if (c && typeof c === "object") {
+    const fn = (c.first_name ?? "").trim();
+    const ln = (c.last_name ?? "").trim();
+    const full = [fn, ln].filter(Boolean).join(" ").trim();
+    if (full) return full;
+    const em = (c.email ?? "").trim();
+    if (em) return em;
+  }
+  const direct = (order.email ?? order.contact_email ?? "").trim();
+  if (direct) return direct;
+  const b = order.billing_address;
+  if (b && typeof b === "object") {
+    const fn = (b.first_name ?? "").trim();
+    const ln = (b.last_name ?? "").trim();
+    const full = [fn, ln].filter(Boolean).join(" ").trim();
+    if (full) return full;
+  }
+  return undefined;
 }
 
 export function lineItemsToProducts(lineItems: ShopifyLineItem[]): Product[] {
@@ -137,6 +176,8 @@ export async function fetchShopifyOrderDetails(
   products: Product[];
   originalAmount: number;
   calculatedRefund: number;
+  /** From Shopify order when available (name, else email, else billing name). */
+  customerName?: string;
 }> {
   const shopHost = normalizeShopDomain(shop);
   const token = adminAccessToken.trim();
@@ -196,10 +237,12 @@ export async function fetchShopifyOrderDetails(
   const subtotal = parseFloat(order.subtotal_price || order.total_price || "0");
   const returnFee = 3;
   const calculatedRefund = Math.max(0, subtotal - returnFee);
+  const customerName = customerDisplayNameFromShopifyOrder(order);
 
   return {
     products,
     originalAmount: subtotal,
     calculatedRefund,
+    ...(customerName ? { customerName } : {}),
   };
 }

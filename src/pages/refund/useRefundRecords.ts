@@ -122,6 +122,9 @@ export function useRefundRecords(
             originalAmount: details.originalAmount,
             calculatedRefund: details.calculatedRefund,
             shopifyFetchError: undefined,
+            ...(details.customerName
+              ? { customer: details.customerName }
+              : {}),
           });
         } catch (e) {
           const message = e instanceof Error ? e.message : "Request failed";
