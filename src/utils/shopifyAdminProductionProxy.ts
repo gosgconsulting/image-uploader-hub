@@ -26,6 +26,23 @@ function parseShopifyAdminGetPayload(
   return { error: "Invalid response from server" };
 }
 
+/** Prefer a non-expired access token for Edge Function auth (esp. when JWT verification is on). */
+async function functionsAuthHeaders(): Promise<Record<string, string>> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token) return {};
+
+  const expMs = (session.expires_at ?? 0) * 1000;
+  if (expMs < Date.now() + 120_000) {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (!error && data.session?.access_token) {
+      return { Authorization: `Bearer ${data.session.access_token}` };
+    }
+  }
+  return { Authorization: `Bearer ${session.access_token}` };
+}
+
 /**
  * Production: Shopify Admin API has no browser CORS; call via Edge Function.
  * Dev continues to use the same-origin Vite proxy (`/shopify-proxy/...`) in callers.
@@ -36,9 +53,10 @@ export async function adminGetViaProductionProxy(body: {
   orderNumericId?: string;
   adminAccessToken?: string;
 }): Promise<{ ok: true } & ShopifyAdminGetOk | { ok: false; error: string }> {
+  const headers = await functionsAuthHeaders();
   const { data, error } = await supabase.functions.invoke<Record<string, unknown>>(
     "shopify-admin-get",
-    { body }
+    { body, ...(Object.keys(headers).length ? { headers } : {}) }
   );
   if (error) {
     return { ok: false, error: error.message };
