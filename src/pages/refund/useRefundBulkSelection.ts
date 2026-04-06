@@ -1,9 +1,10 @@
 import { useState, useMemo, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import type { Refund } from "@/types/refund";
-import { invokeProcessShopifyRefunds } from "@/lib/processShopifyRefunds";
-import { supabase } from "@/integrations/supabase/client";
-import { fetchEmbeddedShopifySessionToken } from "@/lib/shopifyEmbeddedSessionToken";
+import {
+  invokeProcessShopifyRefunds,
+  resolveRefundAuthBearer,
+} from "@/lib/processShopifyRefunds";
 
 export function useRefundBulkSelection(
   filteredAndSortedRefunds: Refund[],
@@ -32,24 +33,12 @@ export function useRefundBulkSelection(
   const handleConfirmBulkRefund = useCallback(async () => {
     setIsProcessingBulkRefund(true);
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    const host = options?.embeddedHost?.trim() ?? "";
-    let authBearer: string | undefined;
-    if (host) {
-      const shopifySession = await fetchEmbeddedShopifySessionToken(host);
-      if (shopifySession) authBearer = shopifySession;
-    }
-    if (!authBearer && session?.access_token) {
-      authBearer = session.access_token;
-    }
+    const authBearer = await resolveRefundAuthBearer(options?.embeddedHost ?? null);
 
     if (!authBearer) {
       toast({
         title: "Authentication required",
-        description: host
+        description: options?.embeddedHost?.trim()
           ? "Could not get a Shopify session token. Reload the app from Shopify Admin, or sign in here with credentials saved for this shop."
           : "Bulk Shopify refunds need a signed-in user with credentials saved for this shop, or open the app embedded in Shopify Admin.",
         variant: "destructive",

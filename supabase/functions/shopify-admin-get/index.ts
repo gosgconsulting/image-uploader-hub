@@ -48,6 +48,14 @@ async function authorizeBodyTokenCaller(
     return { ok: true };
   }
 
+  const {
+    data: { user },
+    error: userErr,
+  } = await admin.auth.getUser(jwt);
+  if (!userErr && user) {
+    return { ok: true };
+  }
+
   const clientId = Deno.env.get("SHOPIFY_CLIENT_ID")?.trim() ?? "";
   const clientSecret = Deno.env.get("SHOPIFY_CLIENT_SECRET")?.trim() ?? "";
   if (jwtHeaderAlg(jwt) === "HS256" && clientId && clientSecret) {
@@ -65,14 +73,7 @@ async function authorizeBodyTokenCaller(
     return { ok: true };
   }
 
-  const {
-    data: { user },
-    error,
-  } = await admin.auth.getUser(jwt);
-  if (error || !user) {
-    return { ok: false, status: 401, error: "Invalid or expired session" };
-  }
-  return { ok: true };
+  return { ok: false, status: 401, error: "Invalid or expired session" };
 }
 
 serve(async (req) => {

@@ -279,6 +279,9 @@ export default function Refund() {
               refunds={paginatedRefunds}
               onRefundUpdate={applyRefundPatch}
               onRefundSoftDelete={handleRefundSoftDelete}
+              shopDomain={shopifyShop}
+              embeddedHost={embeddedHost}
+              reloadRefunds={loadRefunds}
               selectedRefundIds={selectedRefundIds}
               onSelectionChange={setSelectedRefundIds}
             />

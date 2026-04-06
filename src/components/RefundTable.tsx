@@ -19,6 +19,10 @@ import { ViewPdfDialog } from "@/components/ViewPdfDialog";
 import { RefundDetailsModal } from "@/components/RefundDetailsModal";
 import { useToast } from "@/hooks/use-toast";
 import {
+  invokeProcessShopifyRefunds,
+  resolveRefundAuthBearer,
+} from "@/lib/processShopifyRefunds";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -33,6 +37,10 @@ interface RefundTableProps {
   refunds: Refund[];
   onRefundUpdate: (id: string, updates: Partial<Refund>) => void;
   onRefundSoftDelete: (id: string) => void;
+  /** Used with the Shopify refund edge function (same shop as saved credentials). */
+  shopDomain: string;
+  embeddedHost: string | null;
+  reloadRefunds: () => void;
   selectedRefundIds?: Set<string>;
   onSelectionChange?: (selectedIds: Set<string>) => void;
 }
@@ -51,6 +59,9 @@ export function RefundTable({
   refunds, 
   onRefundUpdate,
   onRefundSoftDelete,
+  shopDomain,
+  embeddedHost,
+  reloadRefunds,
   selectedRefundIds = new Set(),
   onSelectionChange,
 }: RefundTableProps) {
@@ -132,21 +143,106 @@ export function RefundTable({
 
   const handleRefund = async (refund: Refund) => {
     if (refund.status === "failed") return;
+    if (refund.shopifyRefundId) {
+      toast({
+        title: "Already refunded in Shopify",
+        description: `Order ${refund.orderId} already has a Shopify refund id.`,
+      });
+      return;
+    }
+    if (refund.shopifyFetchStatus !== "ok") {
+      toast({
+        title: "Could not load Shopify order",
+        description:
+          refund.shopifyFetchError ||
+          "Wait for order details to load, or check Shopify API settings.",
+        variant: "destructive",
+      });
+      return;
+    }
 
+    const promotedToProcessing = refund.status === "pending";
     setProcessingId(refund.id);
-    if (refund.status === "pending") {
+    if (promotedToProcessing) {
       onRefundUpdate(refund.id, { status: "processing" });
     }
 
-    // Simulate async processing
-    setTimeout(() => {
-      onRefundUpdate(refund.id, { status: "completed" });
+    const authBearer = await resolveRefundAuthBearer(embeddedHost);
+    if (!authBearer) {
+      if (promotedToProcessing) {
+        onRefundUpdate(refund.id, { status: "pending" });
+      }
       setProcessingId(null);
       toast({
-        title: "Refund processed",
-        description: `Refund ${refund.orderId} has been processed successfully.`,
+        title: "Authentication required",
+        description: embeddedHost?.trim()
+          ? "Could not get a Shopify session token. Reload the app from Shopify Admin, or sign in with credentials saved for this shop."
+          : "Sign in with credentials saved for this shop, or open the app embedded in Shopify Admin.",
+        variant: "destructive",
       });
-    }, 1000);
+      return;
+    }
+
+    const shop = shopDomain.trim();
+    if (!shop) {
+      if (promotedToProcessing) {
+        onRefundUpdate(refund.id, { status: "pending" });
+      }
+      setProcessingId(null);
+      toast({
+        title: "Shop domain missing",
+        description: "Open Shopify API settings and save your shop domain.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const { data, error } = await invokeProcessShopifyRefunds(shop, [refund.id], {
+      authorizationBearer: authBearer,
+    });
+
+    if (error) {
+      if (promotedToProcessing) {
+        onRefundUpdate(refund.id, { status: "pending" });
+      }
+      setProcessingId(null);
+      toast({
+        title: "Refund request failed",
+        description: error.message,
+        variant: "destructive",
+      });
+      void reloadRefunds();
+      return;
+    }
+
+    const row = data?.results?.[0];
+    setProcessingId(null);
+    void reloadRefunds();
+
+    if (!row) {
+      toast({
+        title: "Refund request failed",
+        description: "No result from server.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!row.ok && !row.skipped) {
+      toast({
+        title: "Refund failed",
+        description: row.error ?? "Unknown error",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({
+      title: row.skipped ? "Already processed" : "Refund processed",
+      description: row.skipped
+        ? `Order ${refund.orderId} already has a Shopify refund.`
+        : `Refund ${refund.orderId} was sent to Shopify successfully.`,
+    });
   };
 
   if (refunds.length === 0) {
@@ -291,8 +387,12 @@ export function RefundTable({
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRefund(refund)}
-                          disabled={refund.status === "failed" || processingId === refund.id}
+                          onClick={() => void handleRefund(refund)}
+                          disabled={
+                            refund.status === "failed" ||
+                            processingId === refund.id ||
+                            !!refund.shopifyRefundId
+                          }
                         >
                           <DollarSign className="h-3.5 w-3.5" />
                         </Button>
