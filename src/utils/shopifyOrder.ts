@@ -3,6 +3,8 @@ import {
   normalizeShopDomain,
   SHOPIFY_ADMIN_API_VERSION,
 } from "@/lib/shopifyAdminApi";
+import { supabase } from "@/integrations/supabase/client";
+import { adminGetViaProductionProxy } from "@/utils/shopifyAdminProductionProxy";
 
 const SHOPIFY_API_VERSION = SHOPIFY_ADMIN_API_VERSION;
 
@@ -38,28 +40,62 @@ export async function testShopifyAdminConnection(
     return { ok: false, error: "Enter your Admin API access token." };
   }
 
-  const url = buildAdminApiUrl(shopHost, "/shop.json");
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "GET",
-      headers: {
-        "X-Shopify-Access-Token": token,
-        Accept: "application/json",
-      },
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Network error";
-    return { ok: false, error: `Could not reach Shopify (${msg}). Check the shop domain and your network.` };
+  if (import.meta.env.DEV) {
+    const url = buildAdminApiUrl(shopHost, "/shop.json");
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "X-Shopify-Access-Token": token,
+          Accept: "application/json",
+        },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      return {
+        ok: false,
+        error: `Could not reach Shopify (${msg}). Check the shop domain and your network.`,
+      };
+    }
+
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & {
+      errors?: unknown;
+    };
+
+    if (!res.ok) {
+      const err = data.errors;
+      let msg = `Shopify returned ${res.status}`;
+      if (typeof err === "string") msg = err;
+      else if (err && typeof err === "object") msg = JSON.stringify(err);
+      return { ok: false, error: msg };
+    }
+
+    return { ok: true };
   }
 
-  const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & {
-    errors?: unknown;
-  };
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) {
+    return {
+      ok: false,
+      error: "Sign in to verify your Shopify connection from this app.",
+    };
+  }
 
-  if (!res.ok) {
+  const proxied = await adminGetViaProductionProxy({
+    shopDomain: shopHost,
+    kind: "shop",
+    adminAccessToken: token,
+  });
+  if (proxied.ok === false) {
+    return { ok: false, error: proxied.error };
+  }
+  const { shopifyStatus, body: data } = proxied;
+  if (shopifyStatus < 200 || shopifyStatus >= 300) {
     const err = data.errors;
-    let msg = `Shopify returned ${res.status}`;
+    let msg = `Shopify returned ${shopifyStatus}`;
     if (typeof err === "string") msg = err;
     else if (err && typeof err === "object") msg = JSON.stringify(err);
     return { ok: false, error: msg };
@@ -103,24 +139,53 @@ export async function fetchShopifyOrderDetails(
   calculatedRefund: number;
 }> {
   const shopHost = normalizeShopDomain(shop);
-  const url = buildOrderUrl(shopHost, numericOrderId);
+  const token = adminAccessToken.trim();
 
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      "X-Shopify-Access-Token": adminAccessToken,
-      Accept: "application/json",
-    },
-  });
+  let data: ShopifyOrderResponse & { errors?: unknown };
 
-  const data = (await res.json()) as ShopifyOrderResponse & { errors?: unknown };
+  if (import.meta.env.DEV) {
+    const url = buildOrderUrl(shopHost, numericOrderId);
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "X-Shopify-Access-Token": adminAccessToken,
+        Accept: "application/json",
+      },
+    });
+    data = (await res.json()) as ShopifyOrderResponse & { errors?: unknown };
+    if (!res.ok) {
+      const err = data.errors;
+      let msg = `Shopify error ${res.status}`;
+      if (typeof err === "string") msg = err;
+      else if (err && typeof err === "object") msg = JSON.stringify(err);
+      throw new Error(msg);
+    }
+  } else {
+    const body: {
+      shopDomain: string;
+      kind: "order";
+      orderNumericId: string;
+      adminAccessToken?: string;
+    } = {
+      shopDomain: shopHost,
+      kind: "order",
+      orderNumericId: numericOrderId,
+    };
+    if (token) body.adminAccessToken = token;
 
-  if (!res.ok) {
-    const err = data.errors;
-    let msg = `Shopify error ${res.status}`;
-    if (typeof err === "string") msg = err;
-    else if (err && typeof err === "object") msg = JSON.stringify(err);
-    throw new Error(msg);
+    const proxied = await adminGetViaProductionProxy(body);
+    if (proxied.ok === false) {
+      throw new Error(proxied.error);
+    }
+    const { shopifyStatus, body: json } = proxied;
+    data = json as ShopifyOrderResponse & { errors?: unknown };
+    if (shopifyStatus < 200 || shopifyStatus >= 300) {
+      const err = data.errors;
+      let msg = `Shopify error ${shopifyStatus}`;
+      if (typeof err === "string") msg = err;
+      else if (err && typeof err === "object") msg = JSON.stringify(err);
+      throw new Error(msg);
+    }
   }
 
   const order = data.order;

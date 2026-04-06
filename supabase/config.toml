@@ -3,6 +3,9 @@ project_id = "odwnhbjzmovbuoqufxxm"
 [functions.shopify-create-refund]
 verify_jwt = true
 
+[functions.shopify-admin-get]
+verify_jwt = true
+
 # Shopify redirects here without a Supabase JWT; we validate HMAC + state server-side.
 [functions.shopify-oauth]
 verify_jwt = false
