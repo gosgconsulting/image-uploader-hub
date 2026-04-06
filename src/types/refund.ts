@@ -29,4 +29,6 @@ export interface Refund {
   shopifyRefundId?: string;
   shopifyRefundError?: string;
   shopifyRefundAttemptedAt?: string;
+  /** Set when the row is soft-deleted; omitted for active rows in the UI. */
+  deletedAt?: string | null;
 }

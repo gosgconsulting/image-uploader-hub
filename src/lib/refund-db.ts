@@ -63,6 +63,7 @@ export function rowToRefund(row: Tables<"refunds">): Refund {
     shopifyRefundId: row.shopify_refund_id ?? undefined,
     shopifyRefundError: row.shopify_refund_error ?? undefined,
     shopifyRefundAttemptedAt: row.shopify_refund_attempted_at ?? undefined,
+    deletedAt: row.deleted_at ?? undefined,
   };
 }
 
@@ -141,6 +142,9 @@ function partialToUpdate(updates: Partial<Refund>): TablesUpdate<"refunds"> {
   if (updates.shopifyRefundAttemptedAt !== undefined) {
     row.shopify_refund_attempted_at = updates.shopifyRefundAttemptedAt ?? null;
   }
+  if (updates.deletedAt !== undefined) {
+    row.deleted_at = updates.deletedAt ?? null;
+  }
   return row;
 }
 
@@ -156,6 +160,7 @@ export async function fetchRefunds(
     .from("refunds")
     .select("*")
     .eq("shopify_credential_id", id)
+    .is("deleted_at", null)
     .order("date", { ascending: false });
 
   if (error) {

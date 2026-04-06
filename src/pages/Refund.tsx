@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DollarSign, Plus, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -74,6 +74,7 @@ export default function Refund() {
     isLoadingList,
     loadRefunds,
     applyRefundPatch,
+    softDeleteRefund,
     handleImported,
     filteredAndSortedRefunds,
     statusFilter,
@@ -105,6 +106,18 @@ export default function Refund() {
       setRefundListPage(refundPageSafe);
     }
   }, [refundPageSafe, refundListPage]);
+
+  const handleRefundSoftDelete = useCallback(
+    (id: string) => {
+      setSelectedRefundIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      softDeleteRefund(id);
+    },
+    [softDeleteRefund]
+  );
 
   const {
     selectedRefundIds,
@@ -265,6 +278,7 @@ export default function Refund() {
             <RefundTable
               refunds={paginatedRefunds}
               onRefundUpdate={applyRefundPatch}
+              onRefundSoftDelete={handleRefundSoftDelete}
               selectedRefundIds={selectedRefundIds}
               onSelectionChange={setSelectedRefundIds}
             />

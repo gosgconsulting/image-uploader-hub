@@ -194,11 +194,30 @@ export function useRefundRecords(
     setDateSort("desc");
   }, []);
 
+  const softDeleteRefund = useCallback(
+    (id: string) => {
+      const at = new Date().toISOString();
+      setRefunds((prev) => prev.filter((r) => r.id !== id));
+      void updateRefund(id, { deletedAt: at }).then(({ error }) => {
+        if (error) {
+          toast({
+            title: "Could not remove refund",
+            description: error.message,
+            variant: "destructive",
+          });
+          void loadRefunds();
+        }
+      });
+    },
+    [toast, loadRefunds]
+  );
+
   return {
     loadError,
     isLoadingList,
     loadRefunds,
     applyRefundPatch,
+    softDeleteRefund,
     handleImported,
     filteredAndSortedRefunds,
     statusFilter,

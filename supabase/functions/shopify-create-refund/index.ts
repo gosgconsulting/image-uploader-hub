@@ -81,7 +81,8 @@ serve(async (req) => {
       .select(
         "id, status, shopify_numeric_order_id, calculated_refund, shopify_refund_id, reason_of_return"
       )
-      .eq("id", refundId);
+      .eq("id", refundId)
+      .is("deleted_at", null);
     if (credentialId) {
       rowQuery = rowQuery.eq("shopify_credential_id", credentialId);
     } else {

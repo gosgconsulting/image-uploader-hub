@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { format } from "date-fns";
-import { X, DollarSign, Loader2 } from "lucide-react";
+import { X, DollarSign, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -18,10 +18,21 @@ import { EditRefundDialog } from "@/components/EditRefundDialog";
 import { ViewPdfDialog } from "@/components/ViewPdfDialog";
 import { RefundDetailsModal } from "@/components/RefundDetailsModal";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface RefundTableProps {
   refunds: Refund[];
   onRefundUpdate: (id: string, updates: Partial<Refund>) => void;
+  onRefundSoftDelete: (id: string) => void;
   selectedRefundIds?: Set<string>;
   onSelectionChange?: (selectedIds: Set<string>) => void;
 }
@@ -39,9 +50,11 @@ const statusVariant: Record<
 export function RefundTable({ 
   refunds, 
   onRefundUpdate,
+  onRefundSoftDelete,
   selectedRefundIds = new Set(),
   onSelectionChange,
 }: RefundTableProps) {
+  const [deleteConfirmRefund, setDeleteConfirmRefund] = useState<Refund | null>(null);
   const [editRefund, setEditRefund] = useState<Refund | null>(null);
   const [previewRefund, setPreviewRefund] = useState<Refund | null>(null);
   const [refundDetailsModalOpen, setRefundDetailsModalOpen] = useState(false);
@@ -288,6 +301,21 @@ export function RefundTable({
                       </TooltipTrigger>
                       <TooltipContent>Reject</TooltipContent>
                     </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleteConfirmRefund(refund)}
+                          aria-label={`Remove refund ${refund.orderId} from list`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Remove from list</TooltipContent>
+                    </Tooltip>
                   </div>
                 </TableCell>
               </TableRow>
@@ -333,6 +361,50 @@ export function RefundTable({
           }
         }}
       />
+
+      <AlertDialog
+        open={!!deleteConfirmRefund}
+        onOpenChange={(open) => {
+          if (!open) setDeleteConfirmRefund(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-mono text-base">
+              Remove this refund from the list?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteConfirmRefund ? (
+                <>
+                  Order{" "}
+                  <span className="font-mono text-foreground">
+                    {deleteConfirmRefund.orderId}
+                  </span>{" "}
+                  will be hidden from this list. The record is kept in the database (soft delete).
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteConfirmRefund) {
+                  onRefundSoftDelete(deleteConfirmRefund.id);
+                  toast({
+                    title: "Refund removed",
+                    description: `Order ${deleteConfirmRefund.orderId} is no longer shown in your list.`,
+                  });
+                }
+                setDeleteConfirmRefund(null);
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

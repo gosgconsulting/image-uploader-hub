@@ -146,6 +146,7 @@ export type Database = {
           shopify_refund_attempted_at: string | null
           shopify_credential_id: string | null
           shop_domain: string | null
+          deleted_at: string | null
           created_at: string
           updated_at: string
         }
@@ -176,6 +177,7 @@ export type Database = {
           shopify_refund_attempted_at?: string | null
           shopify_credential_id?: string | null
           shop_domain?: string | null
+          deleted_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -206,6 +208,7 @@ export type Database = {
           shopify_refund_attempted_at?: string | null
           shopify_credential_id?: string | null
           shop_domain?: string | null
+          deleted_at?: string | null
           created_at?: string
           updated_at?: string
         }
