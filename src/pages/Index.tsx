@@ -23,6 +23,15 @@ interface Import {
   import_images: ImportImage[];
 }
 
+/** Non-empty value saved in Webhook settings; otherwise `VITE_WEBHOOK_URL` from `.env`. */
+function getInitialWebhookUrl(): string {
+  const stored = localStorage.getItem("webhook_url");
+  if (stored !== null && stored.trim() !== "") return stored.trim();
+  const envUrl = import.meta.env.VITE_WEBHOOK_URL;
+  if (typeof envUrl === "string" && envUrl.trim() !== "") return envUrl.trim();
+  return "";
+}
+
 const SHOPIFY_CLAIM_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -45,9 +54,7 @@ export default function Index() {
 
   const [imports, setImports] = useState<Import[]>([]);
   const [isNewOpen, setIsNewOpen] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState(
-    () => localStorage.getItem("webhook_url") || ""
-  );
+  const [webhookUrl, setWebhookUrl] = useState(() => getInitialWebhookUrl());
 
   const fetchImports = useCallback(async () => {
     const { data } = await supabase

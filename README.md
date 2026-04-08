@@ -24,6 +24,8 @@ The Supabase client is initialized at:
 
 Ensure your Supabase project URL and anon key are configured in your environment (.env) if needed.
 
+Optional: set **`VITE_WEBHOOK_URL`** in `.env` to use that webhook URL by default for Image Imports when nothing is saved in the Webhook popover. Restart the dev server after changing env vars.
+
 ## Shopify app (OAuth) for Refund
 
 Use a **Shopify custom or public app** in the Partner Dashboard (or dev store custom app).

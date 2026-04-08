@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Settings, Check } from "lucide-react";
 import {
   Popover,
@@ -17,6 +17,10 @@ interface WebhookSettingsProps {
 export function WebhookSettings({ webhookUrl, onWebhookUrlChange }: WebhookSettingsProps) {
   const [value, setValue] = useState(webhookUrl);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setValue(webhookUrl);
+  }, [webhookUrl]);
 
   const handleSave = () => {
     onWebhookUrlChange(value);
