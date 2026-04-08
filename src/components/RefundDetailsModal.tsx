@@ -173,7 +173,10 @@ export function RefundDetailsModal({
                             Product name
                           </TableHead>
                           <TableHead className="font-mono text-xs uppercase tracking-wider text-right font-semibold">
-                            Amount
+                            <span className="block">Amount</span>
+                            <span className="block normal-case tracking-normal font-normal text-muted-foreground font-sans mt-0.5">
+                              incl. tax
+                            </span>
                           </TableHead>
                           <TableHead className="w-12 p-2 text-right font-mono text-xs uppercase tracking-wider font-semibold">
                             <span className="sr-only">Remove</span>
@@ -187,13 +190,21 @@ export function RefundDetailsModal({
                               {product.name}
                             </TableCell>
                             <TableCell className="text-right py-3">
-                              <div className="flex items-center justify-end gap-2">
-                                <span className="text-sm font-medium">€</span>
-                                <div className="w-28 h-9 flex items-center justify-end font-mono text-sm text-right border bg-background rounded-md px-3">
-                                  <span className="tabular-nums font-medium">
-                                    {product.amount.toFixed(2)}
-                                  </span>
+                              <div className="flex flex-col items-end gap-1">
+                                <div className="flex items-center justify-end gap-2">
+                                  <span className="text-sm font-medium">€</span>
+                                  <div
+                                    className="w-28 h-9 flex items-center justify-end font-mono text-sm text-right border bg-background rounded-md px-3"
+                                    title="Amount includes tax"
+                                  >
+                                    <span className="tabular-nums font-medium">
+                                      {product.amount.toFixed(2)}
+                                    </span>
+                                  </div>
                                 </div>
+                                <span className="text-[10px] text-muted-foreground leading-none">
+                                  incl. tax
+                                </span>
                               </div>
                             </TableCell>
                             <TableCell className="w-12 p-2 text-right align-middle">

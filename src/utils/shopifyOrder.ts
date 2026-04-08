@@ -104,11 +104,31 @@ export async function testShopifyAdminConnection(
   return { ok: true };
 }
 
+interface ShopifyTaxLine {
+  price?: string;
+}
+
 interface ShopifyLineItem {
   id: number;
   name: string;
   price: string;
   quantity: number;
+  tax_lines?: ShopifyTaxLine[];
+}
+
+function sumLineItemTax(li: ShopifyLineItem): number {
+  return (li.tax_lines ?? []).reduce(
+    (sum, tl) => sum + parseFloat(tl.price || "0"),
+    0
+  );
+}
+
+/** Line total the customer pays for this row: pre-tax + tax when prices exclude tax; else `price`×qty already includes tax. */
+function lineItemCustomerTotal(li: ShopifyLineItem, taxesIncluded: boolean): number {
+  const qty = li.quantity || 1;
+  const linePreTaxOrInclusive = parseFloat(li.price || "0") * qty;
+  if (taxesIncluded) return linePreTaxOrInclusive;
+  return linePreTaxOrInclusive + sumLineItemTax(li);
 }
 
 /** Subset of REST Admin `Order` fields used to show a human-readable customer in the refund list. */
@@ -132,6 +152,8 @@ interface ShopifyOrderResponse {
     line_items?: ShopifyLineItem[];
     subtotal_price?: string;
     total_price?: string;
+    /** When true, line `price` amounts already include tax (do not add `tax_lines` again). */
+    taxes_included?: boolean;
     currency?: string;
   } & ShopifyOrderCustomerShape;
 }
@@ -160,11 +182,14 @@ function customerDisplayNameFromShopifyOrder(
   return undefined;
 }
 
-export function lineItemsToProducts(lineItems: ShopifyLineItem[]): Product[] {
+export function lineItemsToProducts(
+  lineItems: ShopifyLineItem[],
+  taxesIncluded: boolean
+): Product[] {
   return lineItems.map((li) => ({
     id: String(li.id),
     name: li.name,
-    amount: parseFloat(li.price || "0") * (li.quantity || 1),
+    amount: lineItemCustomerTotal(li, taxesIncluded),
   }));
 }
 
@@ -233,15 +258,19 @@ export async function fetchShopifyOrderDetails(
   if (!order) throw new Error("Order not found");
 
   const lineItems = order.line_items || [];
-  const products = lineItemsToProducts(lineItems);
-  const subtotal = parseFloat(order.subtotal_price || order.total_price || "0");
+  const taxesIncluded = Boolean(order.taxes_included);
+  const products = lineItemsToProducts(lineItems, taxesIncluded);
+  const merchandiseTotalWithTax = products.reduce((sum, p) => sum + p.amount, 0);
+  const fallbackOrderTotal = parseFloat(order.subtotal_price || order.total_price || "0");
+  const originalAmount =
+    merchandiseTotalWithTax > 0 ? merchandiseTotalWithTax : fallbackOrderTotal;
   const returnFee = 3;
-  const calculatedRefund = Math.max(0, subtotal - returnFee);
+  const calculatedRefund = Math.max(0, originalAmount - returnFee);
   const customerName = customerDisplayNameFromShopifyOrder(order);
 
   return {
     products,
-    originalAmount: subtotal,
+    originalAmount,
     calculatedRefund,
     ...(customerName ? { customerName } : {}),
   };
