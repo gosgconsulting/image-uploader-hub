@@ -116,15 +116,14 @@ export function useRefundRecords(
             token,
             r.shopifyNumericOrderId!
           );
+          const name = details.customerName?.trim();
           applyRefundPatch(r.id, {
             shopifyFetchStatus: "ok",
             shopifyProducts: details.products,
             originalAmount: details.originalAmount,
             calculatedRefund: details.calculatedRefund,
             shopifyFetchError: undefined,
-            ...(details.customerName
-              ? { customer: details.customerName }
-              : {}),
+            customer: name && name.length > 0 ? name : "N/A",
           });
         } catch (e) {
           const message = e instanceof Error ? e.message : "Request failed";

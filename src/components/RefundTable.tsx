@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { format } from "date-fns";
 import { X, DollarSign, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,20 @@ interface RefundTableProps {
   reloadRefunds: () => void;
   selectedRefundIds?: Set<string>;
   onSelectionChange?: (selectedIds: Set<string>) => void;
+}
+
+/** Spreadsheet import uses this pattern for the customer column before Shopify enrichment. */
+const SHEET_CUSTOMER_PRODUCT_PLACEHOLDER = /^\d+\s+product\(s\)$/i;
+
+function customerDisplayForTable(refund: Refund): { value: string; muted: boolean } {
+  const raw = refund.customer?.trim() ?? "";
+  const isMissing =
+    !raw ||
+    raw === "—" ||
+    raw === "N/A" ||
+    SHEET_CUSTOMER_PRODUCT_PLACEHOLDER.test(raw);
+  if (isMissing) return { value: "N/A", muted: true };
+  return { value: raw, muted: false };
 }
 
 const statusVariant: Record<
@@ -306,6 +320,26 @@ export function RefundTable({
           <TableBody>
             {refunds.map((refund) => {
               const isFailed = refund.status === "failed";
+              let customerCellContent: ReactNode;
+              if (refund.shopifyFetchStatus === "loading") {
+                customerCellContent = (
+                  <span className="inline-flex items-center gap-1 text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    …
+                  </span>
+                );
+              } else if (refund.shopifyFetchStatus === "error") {
+                customerCellContent = (
+                  <span className="text-destructive text-[11px]">—</span>
+                );
+              } else {
+                const { value, muted } = customerDisplayForTable(refund);
+                customerCellContent = muted ? (
+                  <span className="text-muted-foreground">{value}</span>
+                ) : (
+                  value
+                );
+              }
               return (
               <TableRow key={refund.id}>
                 <TableCell>
@@ -325,18 +359,7 @@ export function RefundTable({
                 <TableCell className="text-sm font-mono text-xs">
                   {refund.source}
                 </TableCell>
-                <TableCell className="text-sm">
-                  {refund.shopifyFetchStatus === "loading" ? (
-                    <span className="inline-flex items-center gap-1 text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      …
-                    </span>
-                  ) : refund.shopifyFetchStatus === "error" ? (
-                    <span className="text-destructive text-[11px]">—</span>
-                  ) : (
-                    refund.customer
-                  )}
-                </TableCell>
+                <TableCell className="text-sm">{customerCellContent}</TableCell>
                 <TableCell className="font-mono text-xs">
                   {format(new Date(refund.orderDate), "MMM dd, yyyy")}
                 </TableCell>
