@@ -302,6 +302,9 @@ export function RefundTable({
                 Order Date
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
+                Order Amount
+              </TableHead>
+              <TableHead className="font-mono text-xs uppercase tracking-wider">
                 Refund Amount
               </TableHead>
               <TableHead className="font-mono text-xs uppercase tracking-wider">
@@ -362,6 +365,18 @@ export function RefundTable({
                 <TableCell className="text-sm">{customerCellContent}</TableCell>
                 <TableCell className="font-mono text-xs">
                   {format(new Date(refund.orderDate), "MMM dd, yyyy")}
+                </TableCell>
+                <TableCell className="font-mono text-xs tabular-nums">
+                  {refund.shopifyFetchStatus === "loading" ? (
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      …
+                    </span>
+                  ) : refund.shopifyFetchStatus === "error" ? (
+                    <span className="text-destructive text-[11px]">—</span>
+                  ) : (
+                    `€${refund.originalAmount.toFixed(2)}`
+                  )}
                 </TableCell>
                 <TableCell
                   className="font-mono text-xs tabular-nums cursor-pointer hover:text-primary transition-colors"
@@ -487,6 +502,7 @@ export function RefundTable({
             onRefundUpdate(selectedRefundForDetails.id, {
               calculatedRefund: data.refundAmount,
               returnFee: -data.returnFees,
+              shopifyProducts: data.products,
             });
             toast({
               title: "Refund details updated",

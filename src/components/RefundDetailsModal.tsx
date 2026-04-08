@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -7,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -38,7 +40,7 @@ export function RefundDetailsModal({
 }: RefundDetailsModalProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [returnFees, setReturnFees] = useState<number>(3);
-  const [refundAmount, setRefundAmount] = useState<number>(0);
+  const [refundAmountStr, setRefundAmountStr] = useState<string>("0.00");
   const [isManualRefundAmount, setIsManualRefundAmount] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [pdfPage, setPdfPage] = useState<number>(2);
@@ -60,7 +62,7 @@ export function RefundDetailsModal({
       
       // Use the refund amount from the parent (pre-calculated, source of truth)
       // This value is already correct and calculated using the same logic
-      setRefundAmount(refund.calculatedRefund);
+      setRefundAmountStr(refund.calculatedRefund.toFixed(2));
       // Start with auto-calculation disabled since we're using the pre-calculated value
       setIsManualRefundAmount(false);
       setIsInitialized(true);
@@ -84,33 +86,33 @@ export function RefundDetailsModal({
     return products.reduce((sum, product) => sum + product.amount, 0);
   }, [products]);
 
-  // Note: We no longer auto-calculate refund amount from products
-  // The refund amount comes from the parent (pre-calculated) and can be manually edited
-  // Products are static/read-only, so we don't need to recalculate
-
-  // Product amounts and return fees are now read-only (static)
-  // Only refund amount can be edited
+  const handleRemoveProduct = (productId: string) => {
+    setProducts((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((p) => p.id !== productId);
+      const nextTotal = next.reduce((s, p) => s + p.amount, 0);
+      const suggested = Math.max(0, nextTotal - returnFees);
+      setRefundAmountStr(suggested.toFixed(2));
+      setIsManualRefundAmount(false);
+      return next;
+    });
+  };
 
   const handleRefundAmountChange = (value: string) => {
-    // Remove leading zeros
-    let cleanedValue = value.replace(/^0+(?=\d)/, '');
-    
-    if (cleanedValue === "" || cleanedValue === "." || cleanedValue === "-") {
-      setRefundAmount(0);
-      setIsManualRefundAmount(true);
-      return;
-    }
-    const numValue = parseFloat(cleanedValue) || 0;
-    setRefundAmount(numValue);
+    setRefundAmountStr(value);
     setIsManualRefundAmount(true);
   };
 
   const handleSave = () => {
     if (onSave) {
+      let finalAmount = parseFloat(refundAmountStr);
+      if (isNaN(finalAmount) || finalAmount < 0) {
+        finalAmount = 0;
+      }
       onSave({
         products,
         returnFees,
-        refundAmount,
+        refundAmount: finalAmount,
       });
     }
     onOpenChange(false);
@@ -173,6 +175,9 @@ export function RefundDetailsModal({
                           <TableHead className="font-mono text-xs uppercase tracking-wider text-right font-semibold">
                             Amount
                           </TableHead>
+                          <TableHead className="w-12 p-2 text-right font-mono text-xs uppercase tracking-wider font-semibold">
+                            <span className="sr-only">Remove</span>
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -190,6 +195,30 @@ export function RefundDetailsModal({
                                   </span>
                                 </div>
                               </div>
+                            </TableCell>
+                            <TableCell className="w-12 p-2 text-right align-middle">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                      disabled={products.length <= 1}
+                                      onClick={() => handleRemoveProduct(product.id)}
+                                      aria-label={`Remove ${product.name} from refund`}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {products.length <= 1
+                                    ? "At least one product must stay on the refund"
+                                    : "Remove from refund (partial refund)"}
+                                </TooltipContent>
+                              </Tooltip>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -238,7 +267,7 @@ export function RefundDetailsModal({
                         type="number"
                         step="0.01"
                         min="0"
-                        value={refundAmount.toFixed(2)}
+                        value={refundAmountStr}
                         onChange={(e) => handleRefundAmountChange(e.target.value)}
                         className="w-28 h-9 font-mono text-sm text-right font-semibold border bg-background focus-visible:ring-1 focus-visible:ring-ring"
                       />
