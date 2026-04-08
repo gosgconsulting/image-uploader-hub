@@ -114,7 +114,8 @@ export function useRefundRecords(
           const details = await fetchShopifyOrderDetails(
             shop,
             token,
-            r.shopifyNumericOrderId!
+            r.shopifyNumericOrderId!,
+            r.sheetProductNames
           );
           const name = details.customerName?.trim();
           applyRefundPatch(r.id, {

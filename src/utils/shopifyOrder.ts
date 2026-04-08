@@ -152,6 +152,7 @@ interface ShopifyOrderResponse {
     line_items?: ShopifyLineItem[];
     subtotal_price?: string;
     total_price?: string;
+    current_total_price?: string;
     /** When true, line `price` amounts already include tax (do not add `tax_lines` again). */
     taxes_included?: boolean;
     currency?: string;
@@ -196,7 +197,8 @@ export function lineItemsToProducts(
 export async function fetchShopifyOrderDetails(
   shop: string,
   adminAccessToken: string,
-  numericOrderId: string
+  numericOrderId: string,
+  sheetProductNames?: string[]
 ): Promise<{
   products: Product[];
   originalAmount: number;
@@ -259,13 +261,26 @@ export async function fetchShopifyOrderDetails(
 
   const lineItems = order.line_items || [];
   const taxesIncluded = Boolean(order.taxes_included);
-  const products = lineItemsToProducts(lineItems, taxesIncluded);
+  let products = lineItemsToProducts(lineItems, taxesIncluded);
+
+  if (sheetProductNames && sheetProductNames.length > 0) {
+    const normalizedSheetNames = sheetProductNames.map(n => n.trim().toLowerCase()).filter(Boolean);
+    if (normalizedSheetNames.length > 0) {
+      const filtered = products.filter(p => {
+        const pName = p.name.trim().toLowerCase();
+        return normalizedSheetNames.some(sn => pName.includes(sn) || sn.includes(pName));
+      });
+      if (filtered.length > 0) {
+        products = filtered;
+      }
+    }
+  }
+
   const merchandiseTotalWithTax = products.reduce((sum, p) => sum + p.amount, 0);
-  const fallbackOrderTotal = parseFloat(order.subtotal_price || order.total_price || "0");
-  const originalAmount =
-    merchandiseTotalWithTax > 0 ? merchandiseTotalWithTax : fallbackOrderTotal;
+  const originalAmount = parseFloat(order.current_total_price || order.total_price || "0");
+  const fallbackRefundBase = merchandiseTotalWithTax > 0 ? merchandiseTotalWithTax : originalAmount;
   const returnFee = 3;
-  const calculatedRefund = Math.max(0, originalAmount - returnFee);
+  const calculatedRefund = Math.max(0, fallbackRefundBase - returnFee);
   const customerName = customerDisplayNameFromShopifyOrder(order);
 
   return {
