@@ -4,6 +4,14 @@ import type {
   RefundWorkbookSheetMeta,
   ParseRefundSpreadsheetOptions,
 } from "@/types/refundSpreadsheet";
+import { forwardFillShopifyOrderColumns } from "@/utils/refundSpreadsheetOrderFill";
+import {
+  groupNormalizedRowsByOrderId,
+  sortParsedRefundGroups,
+} from "@/utils/refundSpreadsheetGrouping";
+import { extractShopifyNumericOrderId } from "@/utils/refundSpreadsheetOrderIds";
+
+export { extractShopifyNumericOrderId };
 
 function normalizeHeaderKey(key: string): string {
   return key.trim().toLowerCase().replace(/\s+/g, "_");
@@ -101,19 +109,6 @@ function rowToNormalized(row: Record<string, unknown>): Record<string, string> {
   return out;
 }
 
-export function extractShopifyNumericOrderId(
-  numeroCommande: string,
-  lienShopify: string
-): string | null {
-  const fromLink = lienShopify.match(/\/orders\/(\d+)/);
-  if (fromLink) return fromLink[1];
-  const parts = numeroCommande.split("/");
-  const last = parts[parts.length - 1]?.trim();
-  if (last && /^\d+$/.test(last)) return last;
-  const m = numeroCommande.match(/(\d{10,})/);
-  return m ? m[1] : null;
-}
-
 function parseCellDate(val: unknown): string {
   if (val instanceof Date && !isNaN(val.getTime())) {
     return val.toISOString().slice(0, 10);
@@ -148,17 +143,12 @@ function parseGroupsFromSheet(
   if (rawRows.length === 0) throw new Error("No data rows in sheet.");
 
   const normalized = rawRows.map(rowToNormalized);
+  forwardFillShopifyOrderColumns(normalized);
 
-  const groups = new Map<string, Record<string, string>[]>();
-  for (const r of normalized) {
-    const rawPage = getField(r, "page", "page_") || "1";
-    const pageKey = pageKeyPrefix ? `${pageKeyPrefix}${rawPage}` : rawPage;
-    if (!groups.has(pageKey)) groups.set(pageKey, []);
-    groups.get(pageKey)!.push(r);
-  }
+  const groups = groupNormalizedRowsByOrderId(normalized, pageKeyPrefix);
 
   const result: ParsedRefundGroup[] = [];
-  for (const [pageKey, rows] of groups) {
+  for (const [groupKey, rows] of groups) {
     let orderIdDisplay = "";
     let provenance = "";
     let orderDateRaw: unknown = "";
@@ -183,11 +173,16 @@ function parseGroupsFromSheet(
       numericOrderId = extractShopifyNumericOrderId(orderIdDisplay, lien);
     }
 
+    const pageKey =
+      numericOrderId != null
+        ? `${pageKeyPrefix ?? ""}${numericOrderId}`
+        : groupKey;
+
     const orderDateIso = parseCellDate(orderDateRaw);
 
     result.push({
       pageKey,
-      orderIdDisplay: orderIdDisplay || `Page ${pageKey}`,
+      orderIdDisplay: orderIdDisplay || `Order ${pageKey}`,
       provenance: provenance || "—",
       orderDateIso,
       reason: reason || "—",
@@ -197,18 +192,9 @@ function parseGroupsFromSheet(
     });
   }
 
-  sortGroupsByPageKey(result);
+  sortParsedRefundGroups(result);
 
   return result;
-}
-
-function sortGroupsByPageKey(groups: ParsedRefundGroup[]): void {
-  groups.sort((a, b) => {
-    const na = parseInt(a.pageKey, 10);
-    const nb = parseInt(b.pageKey, 10);
-    if (!isNaN(na) && !isNaN(nb)) return na - nb;
-    return a.pageKey.localeCompare(b.pageKey, undefined, { numeric: true });
-  });
 }
 
 export function parseRefundSpreadsheetBuffer(
@@ -241,6 +227,6 @@ export function parseRefundSpreadsheetBuffer(
     const prefix = multi ? `${name} · ` : null;
     merged.push(...parseGroupsFromSheet(sheet, prefix));
   }
-  sortGroupsByPageKey(merged);
+  sortParsedRefundGroups(merged);
   return merged;
 }
