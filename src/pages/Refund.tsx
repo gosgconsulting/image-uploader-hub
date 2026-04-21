@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DollarSign, Plus, Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { RefundTable } from "@/components/RefundTable";
 import { ShopifySettings } from "@/components/ShopifySettings";
 import { RefundImportDialog } from "@/components/RefundImportDialog";
@@ -23,30 +22,6 @@ export default function Refund() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [refundListPage, setRefundListPage] = useState(1);
   const [searchParams] = useSearchParams();
-  const [hasAuthSession, setHasAuthSession] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    console.log(
-      JSON.stringify({
-        source: "[refund-page]",
-        event: "refund_mount",
-        current_url: typeof window !== "undefined" ? window.location.href : null,
-        search_from_router: searchParams.toString(),
-      })
-    );
-  }, [searchParams]);
-
-  useEffect(() => {
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      setHasAuthSession(!!session);
-    });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setHasAuthSession(!!session);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
 
   const {
     shopifyShop,
@@ -133,8 +108,7 @@ export default function Refund() {
   });
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-7xl px-6 py-10">
+    <div className="mx-auto max-w-7xl px-6 py-10">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-md bg-primary flex items-center justify-center">
@@ -149,26 +123,6 @@ export default function Refund() {
           </div>
 
           <div className="flex items-center gap-2">
-            {hasAuthSession === false ? (
-              <>
-                <Button variant="outline" size="sm" asChild>
-                  <Link to={AUTH_REFUND}>Sign in</Link>
-                </Button>
-                <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
-                  <Link to={AUTH_SIGNUP_REFUND}>Sign up</Link>
-                </Button>
-              </>
-            ) : null}
-            {hasAuthSession ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="font-mono text-xs"
-                onClick={() => void supabase.auth.signOut()}
-              >
-                Sign out
-              </Button>
-            ) : null}
             {selectedRefundIds.size > 0 && (
               <Button variant="default" size="sm" onClick={handleBulkRefund}>
                 <DollarSign className="h-3.5 w-3.5 mr-1.5" />
@@ -308,7 +262,6 @@ export default function Refund() {
           onConfirm={handleConfirmBulkRefund}
           isProcessing={isProcessingBulkRefund}
         />
-      </div>
     </div>
   );
 }
