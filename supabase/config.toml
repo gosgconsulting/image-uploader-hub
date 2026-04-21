@@ -1,0 +1,14 @@
+project_id = "odwnhbjzmovbuoqufxxm"
+
+# Auth is validated in-function via resolveRefundAccessToken (Supabase user JWT or Shopify session JWT).
+# Gateway verify_jwt rejects Shopify session tokens (HS256, wrong issuer for Supabase).
+[functions.shopify-create-refund]
+verify_jwt = false
+
+# Same as shopify-create-refund: caller identity is checked inside the function.
+[functions.shopify-admin-get]
+verify_jwt = false
+
+# Shopify redirects here without a Supabase JWT; we validate HMAC + state server-side.
+[functions.shopify-oauth]
+verify_jwt = false
