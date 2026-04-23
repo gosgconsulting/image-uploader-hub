@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
+import { resolveCredentialsForShopifySessionJwt } from "../_shared/resolveShopifyPartnerAppDb.ts";
 import { normalizeShopDomain } from "../shopify-create-refund/refundLogic.ts";
 import { resolveRefundAccessToken } from "../shopify-create-refund/resolveRefundAccessToken.ts";
 import { verifyShopifySessionToken } from "../shopify-create-refund/verifyShopifySessionToken.ts";
@@ -56,9 +57,15 @@ async function authorizeBodyTokenCaller(
     return { ok: true };
   }
 
-  const clientId = Deno.env.get("SHOPIFY_CLIENT_ID")?.trim() ?? "";
-  const clientSecret = Deno.env.get("SHOPIFY_CLIENT_SECRET")?.trim() ?? "";
-  if (jwtHeaderAlg(jwt) === "HS256" && clientId && clientSecret) {
+  if (jwtHeaderAlg(jwt) === "HS256") {
+    const { clientId, clientSecret } = await resolveCredentialsForShopifySessionJwt(
+      admin,
+      normalizedShop,
+      jwt
+    );
+    if (!clientId || !clientSecret) {
+      return { ok: false, status: 500, error: "Server misconfigured for Shopify session tokens" };
+    }
     const session = await verifyShopifySessionToken(jwt, clientId, clientSecret);
     if (!session.ok) {
       return { ok: false, status: 401, error: session.error };

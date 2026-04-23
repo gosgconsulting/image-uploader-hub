@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
+import { resolveCredentialsForOAuthState } from "../_shared/resolveShopifyPartnerAppDb.ts";
 import { verifyShopifyOAuthHmac } from "./hmacVerify.ts";
 import { persistShopifyInstallToken } from "./persistInstallToken.ts";
 import { oauthDebugLog } from "./oauthDebugLog.ts";
@@ -8,10 +9,8 @@ export async function handleCallback(req: Request): Promise<Response> {
   const returnUrl = Deno.env.get("SHOPIFY_OAUTH_RETURN_URL");
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const clientId = Deno.env.get("SHOPIFY_CLIENT_ID");
-  const clientSecret = Deno.env.get("SHOPIFY_CLIENT_SECRET");
 
-  if (!returnUrl || !supabaseUrl || !serviceKey || !clientId || !clientSecret) {
+  if (!returnUrl || !supabaseUrl || !serviceKey) {
     return new Response("OAuth server misconfigured", { status: 500 });
   }
 
@@ -31,15 +30,6 @@ export async function handleCallback(req: Request): Promise<Response> {
     const desc = sp.get("error_description") || oauthError;
     return spaOAuthErrorRedirect(returnUrl, desc.slice(0, 500), {
       phase: "shopify_authorize_error",
-      shop: sp.get("shop"),
-      oauthState: sp.get("state"),
-    });
-  }
-
-  const okHmac = await verifyShopifyOAuthHmac(sp, clientSecret);
-  if (!okHmac) {
-    return spaOAuthErrorRedirect(returnUrl, "Invalid HMAC", {
-      phase: "callback_hmac_invalid",
       shop: sp.get("shop"),
       oauthState: sp.get("state"),
     });
@@ -68,7 +58,9 @@ export async function handleCallback(req: Request): Promise<Response> {
   const admin = createClient(supabaseUrl, serviceKey);
   const { data: row, error: rowErr } = await admin
     .from("shopify_oauth_states")
-    .select("user_id, shop_domain, expires_at, consumed_at, pending_claim_nonce, brand_id")
+    .select(
+      "user_id, shop_domain, expires_at, consumed_at, pending_claim_nonce, brand_id, partner_app_id"
+    )
     .eq("state", state)
     .maybeSingle();
 
@@ -104,6 +96,31 @@ export async function handleCallback(req: Request): Promise<Response> {
       shop: shopHost,
       oauthState: state,
       claimNonce: row.pending_claim_nonce as string | null | undefined,
+    });
+  }
+
+  const { clientId, clientSecret } = await resolveCredentialsForOAuthState(admin, {
+    partner_app_id: (row.partner_app_id as string | null) ?? null,
+  });
+
+  if (!clientId || !clientSecret) {
+    return spaOAuthErrorRedirect(
+      returnUrl,
+      "OAuth server misconfigured: missing Shopify app credentials for this flow.",
+      {
+        phase: "callback_missing_app_credentials",
+        shop: shopHost,
+        oauthState: state,
+      }
+    );
+  }
+
+  const okHmac = await verifyShopifyOAuthHmac(sp, clientSecret);
+  if (!okHmac) {
+    return spaOAuthErrorRedirect(returnUrl, "Invalid HMAC", {
+      phase: "callback_hmac_invalid",
+      shop: shopHost,
+      oauthState: state,
     });
   }
 
@@ -153,10 +170,12 @@ export async function handleCallback(req: Request): Promise<Response> {
     state
   );
 
+  const partnerAppIdForInstall = (row.partner_app_id as string | null) ?? null;
   const installSaved = await persistShopifyInstallToken(
     admin,
     shopHost,
-    tokenJson.access_token
+    tokenJson.access_token,
+    partnerAppIdForInstall
   );
   if (!installSaved.ok) {
     return spaOAuthErrorRedirect(returnUrl, "Could not persist install token", {

@@ -5,6 +5,8 @@ type Props = {
   sessionConnected: boolean;
   shop: string;
   oauthUi: boolean;
+  /** When OAuth build and user chose manual token path (paste shpat_). */
+  manualTokenMode?: boolean;
   liveConnectionStatus?: ShopifyLiveConnectionStatus;
   liveConnectionError?: string | null;
   formShopDiffers: boolean;
@@ -15,6 +17,7 @@ export function ShopifySettingsStatusBlock({
   sessionConnected,
   shop,
   oauthUi,
+  manualTokenMode = false,
   liveConnectionStatus,
   liveConnectionError,
   formShopDiffers,
@@ -52,7 +55,9 @@ export function ShopifySettingsStatusBlock({
           <p className="text-muted-foreground">
             <span className="font-medium text-foreground">Not connected</span>
             {oauthUi
-              ? " — use Connect below or install the app from Shopify Admin."
+              ? manualTokenMode
+                ? " — enter your shop and Admin token, then Save."
+                : " — use Connect below or install the app from Shopify Admin."
               : " — enter your shop and Admin token, then Save."}
           </p>
         )}

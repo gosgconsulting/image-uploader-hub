@@ -38,6 +38,41 @@ export type Database = {
         }
         Relationships: []
       }
+      brand_shopify_partner_apps: {
+        Row: {
+          id: string
+          brand_id: string
+          shopify_client_id: string
+          shopify_client_secret: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          brand_id: string
+          shopify_client_id: string
+          shopify_client_secret: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          brand_id?: string
+          shopify_client_id?: string
+          shopify_client_secret?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_shopify_partner_apps_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: true
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       import_images: {
         Row: {
           created_at: string
@@ -151,16 +186,19 @@ export type Database = {
           shop_domain: string
           access_token: string
           updated_at: string
+          partner_app_id: string | null
         }
         Insert: {
           shop_domain: string
           access_token: string
           updated_at?: string
+          partner_app_id?: string | null
         }
         Update: {
           shop_domain?: string
           access_token?: string
           updated_at?: string
+          partner_app_id?: string | null
         }
         Relationships: []
       }
@@ -265,7 +303,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      upsert_brand_shopify_partner_app: {
+        Args: {
+          p_brand_id: string
+          p_client_id: string
+          p_client_secret: string
+        }
+        Returns: Json
+      }
+      get_brand_shopify_partner_app_public: {
+        Args: { p_brand_id: string }
+        Returns: Json
+      }
+      delete_brand_shopify_partner_app: {
+        Args: { p_brand_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

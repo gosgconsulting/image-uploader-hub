@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
+import { resolveShopifyAppCredentialsFromEnv } from "../_shared/resolveShopifyAppCredentials.ts";
+import { resolvePartnerAppByBrandId } from "../_shared/resolveShopifyPartnerAppDb.ts";
 import { randomStateToken } from "./oauthCrypto.ts";
 import { corsHeaders } from "./cors.ts";
 import { oauthDebugLog } from "./oauthDebugLog.ts";
@@ -32,13 +34,7 @@ export async function handleBeginManualOAuth(
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const clientId = Deno.env.get("SHOPIFY_CLIENT_ID");
-  const clientSecret = Deno.env.get("SHOPIFY_CLIENT_SECRET");
-  const scopes =
-    Deno.env.get("SHOPIFY_OAUTH_SCOPES") ||
-    "read_orders,write_orders";
-
-  if (!supabaseUrl || !serviceKey || !clientId || !clientSecret) {
+  if (!supabaseUrl || !serviceKey) {
     return json({ error: "OAuth server misconfigured" }, 500);
   }
 
@@ -76,6 +72,31 @@ export async function handleBeginManualOAuth(
     brandId = String(owned.id);
   }
 
+  let partnerAppId: string | null = null;
+  let { clientId, clientSecret } = resolveShopifyAppCredentialsFromEnv();
+  if (brandId) {
+    const appRow = await resolvePartnerAppByBrandId(admin, brandId);
+    if (appRow) {
+      partnerAppId = appRow.id;
+      clientId = appRow.clientId;
+      clientSecret = appRow.clientSecret;
+    }
+  }
+
+  if (!clientId || !clientSecret) {
+    return json(
+      {
+        error:
+          "OAuth not configured: set SHOPIFY_CLIENT_ID/SECRET on the function, or save Partner app credentials for this brand.",
+      },
+      500
+    );
+  }
+
+  const scopes =
+    Deno.env.get("SHOPIFY_OAUTH_SCOPES") ||
+    "read_orders,write_orders";
+
   const state = randomStateToken();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
@@ -85,6 +106,7 @@ export async function handleBeginManualOAuth(
     shop_domain: host,
     expires_at: expiresAt,
     brand_id: brandId,
+    partner_app_id: partnerAppId,
   });
 
   if (insErr) {
@@ -103,6 +125,7 @@ export async function handleBeginManualOAuth(
     shopify_admin_url: `https://${host}`,
     oauth_state: state,
     has_user_id: userId !== null,
+    has_partner_app: partnerAppId !== null,
     redirect_url: authorizeUrl,
   });
 

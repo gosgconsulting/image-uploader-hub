@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { decodeJwt } from "https://esm.sh/jose@5.9.6";
+import { resolveCredentialsForShopifySessionJwt } from "../_shared/resolveShopifyPartnerAppDb.ts";
 import { verifyShopifySessionToken } from "./verifyShopifySessionToken.ts";
 
 export type ResolvedAccess =
@@ -26,9 +27,6 @@ export async function resolveRefundAccessToken(
   bearer: string,
   normalizedShop: string
 ): Promise<ResolvedAccess> {
-  const clientId = Deno.env.get("SHOPIFY_CLIENT_ID")?.trim() ?? "";
-  const clientSecret = Deno.env.get("SHOPIFY_CLIENT_SECRET")?.trim() ?? "";
-
   const {
     data: { user },
     error: userErr,
@@ -58,16 +56,21 @@ export async function resolveRefundAccessToken(
   }
 
   const looksShopify = payloadLooksLikeShopifySessionToken(bearer);
-  if (looksShopify && (!clientId || !clientSecret)) {
-    return {
-      ok: false,
-      status: 500,
-      error:
-        "Server misconfigured: set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET on the shopify-create-refund function so embedded session tokens can be verified.",
-    };
-  }
+  if (looksShopify) {
+    const { clientId, clientSecret } = await resolveCredentialsForShopifySessionJwt(
+      admin,
+      normalizedShop,
+      bearer
+    );
+    if (!clientId || !clientSecret) {
+      return {
+        ok: false,
+        status: 500,
+        error:
+          "Server misconfigured: set SHOPIFY_CLIENT_* / SHOPIFY_CUSTOM_APP_* on shopify-create-refund, or save per-brand Partner app credentials for embedded session tokens.",
+      };
+    }
 
-  if (looksShopify && clientId && clientSecret) {
     const session = await verifyShopifySessionToken(bearer, clientId, clientSecret);
     if (!session.ok) {
       return { ok: false, status: 401, error: session.error };
