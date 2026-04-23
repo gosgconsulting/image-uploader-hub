@@ -18,6 +18,7 @@ export async function runRefundOAuthInstallClaimSideEffects(opts: {
   setShopifyLinkSignInHintShop: Dispatch<SetStateAction<string | null>>;
   afterClaim: () => void;
   hydrateShopifySession: () => Promise<void>;
+  claimBrandId?: string | null;
 }): Promise<void> {
   const {
     lockKey,
@@ -30,6 +31,7 @@ export async function runRefundOAuthInstallClaimSideEffects(opts: {
     setShopifyLinkSignInHintShop,
     afterClaim,
     hydrateShopifySession,
+    claimBrandId,
   } = opts;
 
   setShopifyClaimBusy(true);
@@ -40,6 +42,7 @@ export async function runRefundOAuthInstallClaimSideEffects(opts: {
       toast,
       setShopifyShop,
       setShopifyConnectionId,
+      claimBrandId,
     });
     if (outcome === "deferred_sign_in") {
       const hint =

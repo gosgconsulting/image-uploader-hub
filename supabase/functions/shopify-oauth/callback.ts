@@ -68,7 +68,7 @@ export async function handleCallback(req: Request): Promise<Response> {
   const admin = createClient(supabaseUrl, serviceKey);
   const { data: row, error: rowErr } = await admin
     .from("shopify_oauth_states")
-    .select("user_id, shop_domain, expires_at, consumed_at, pending_claim_nonce")
+    .select("user_id, shop_domain, expires_at, consumed_at, pending_claim_nonce, brand_id")
     .eq("state", state)
     .maybeSingle();
 
@@ -167,6 +167,19 @@ export async function handleCallback(req: Request): Promise<Response> {
   }
 
   if (userId) {
+    const brandFromState = row.brand_id as string | null | undefined;
+    if (!brandFromState) {
+      return spaOAuthErrorRedirect(
+        returnUrl,
+        "Missing brand for this connection. Open Shopify settings from the dashboard and connect again.",
+        {
+          phase: "callback_missing_brand_id",
+          shop: shopHost,
+          oauthState: state,
+        }
+      );
+    }
+
     const { data: credRow, error: upErr } = await admin
       .from("shopify_credentials")
       .upsert(
@@ -174,8 +187,9 @@ export async function handleCallback(req: Request): Promise<Response> {
           user_id: userId,
           shop_domain: shopHost,
           access_token: tokenJson.access_token,
+          brand_id: brandFromState,
         },
-        { onConflict: "user_id,shop_domain" }
+        { onConflict: "user_id,brand_id" }
       )
       .select("id")
       .single();

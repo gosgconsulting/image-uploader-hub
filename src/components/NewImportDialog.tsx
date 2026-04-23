@@ -17,9 +17,16 @@ interface NewImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onImportCreated: () => void;
+  /** Required when creating an import row (scoped to the dashboard brand). */
+  brandId: string | null;
 }
 
-export function NewImportDialog({ open, onOpenChange, onImportCreated }: NewImportDialogProps) {
+export function NewImportDialog({
+  open,
+  onOpenChange,
+  onImportCreated,
+  brandId,
+}: NewImportDialogProps) {
   const [batchName, setBatchName] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -62,13 +69,21 @@ export function NewImportDialog({ open, onOpenChange, onImportCreated }: NewImpo
       toast({ title: "No images", description: "Add at least one image.", variant: "destructive" });
       return;
     }
+    if (!brandId?.trim()) {
+      toast({
+        title: "Select a brand",
+        description: "Choose a brand in the sidebar before creating an import.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsUploading(true);
     try {
       // Create import record
       const { data: importData, error: importError } = await supabase
         .from("imports")
-        .insert({ batch_name: batchName || null })
+        .insert({ batch_name: batchName || null, brand_id: brandId.trim() })
         .select()
         .single();
 

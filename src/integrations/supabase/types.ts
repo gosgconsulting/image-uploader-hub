@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      brands: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          name: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          name?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       import_images: {
         Row: {
           created_at: string
@@ -52,6 +76,7 @@ export type Database = {
       imports: {
         Row: {
           batch_name: string | null
+          brand_id: string | null
           created_at: string
           id: string
           status: string
@@ -60,6 +85,7 @@ export type Database = {
         }
         Insert: {
           batch_name?: string | null
+          brand_id?: string | null
           created_at?: string
           id?: string
           status?: string
@@ -68,18 +94,28 @@ export type Database = {
         }
         Update: {
           batch_name?: string | null
+          brand_id?: string | null
           created_at?: string
           id?: string
           status?: string
           updated_at?: string
           webhook_url?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "imports_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       shopify_credentials: {
         Row: {
           id: string
           user_id: string
+          brand_id: string
           shop_domain: string
           access_token: string
           updated_at: string
@@ -87,6 +123,7 @@ export type Database = {
         Insert: {
           id?: string
           user_id: string
+          brand_id: string
           shop_domain: string
           access_token: string
           updated_at?: string
@@ -94,11 +131,20 @@ export type Database = {
         Update: {
           id?: string
           user_id?: string
+          brand_id?: string
           shop_domain?: string
           access_token?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "shopify_credentials_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       shopify_install_tokens: {
         Row: {

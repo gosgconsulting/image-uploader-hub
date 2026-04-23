@@ -30,12 +30,12 @@ export async function handleClaim(req: Request, parsedBody?: unknown): Promise<R
   }
   const jwt = authHeader.slice(7);
 
-  let body: { shop?: string; claimNonce?: string };
+  let body: { shop?: string; claimNonce?: string; brand_id?: string };
   if (parsedBody !== undefined) {
     if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
       return json({ error: "Invalid JSON body" }, { status: 400 });
     }
-    body = parsedBody as { shop?: string; claimNonce?: string };
+    body = parsedBody as { shop?: string; claimNonce?: string; brand_id?: string };
   } else {
     try {
       body = await req.json();
@@ -71,6 +71,27 @@ export async function handleClaim(req: Request, parsedBody?: unknown): Promise<R
 
   if (userErr || !user) {
     return json({ error: "Invalid or expired session" }, { status: 401 });
+  }
+
+  async function resolveBrandIdForClaim(bodyBrand: unknown): Promise<string | null> {
+    const trimmed = typeof bodyBrand === "string" ? bodyBrand.trim() : "";
+    if (trimmed) {
+      const { data: owned } = await admin
+        .from("brands")
+        .select("id")
+        .eq("id", trimmed)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (owned?.id) return String(owned.id);
+    }
+    const { data: first } = await admin
+      .from("brands")
+      .select("id")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    return first?.id ? String(first.id) : null;
   }
 
   let pending: PendingRow | null = null;
@@ -117,6 +138,17 @@ export async function handleClaim(req: Request, parsedBody?: unknown): Promise<R
     return json({ error: "Install link expired. Re-open the app from Shopify Admin." }, { status: 400 });
   }
 
+  const resolvedBrandId = await resolveBrandIdForClaim(body.brand_id);
+  if (!resolvedBrandId) {
+    return json(
+      {
+        error:
+          "Add a brand in the dashboard (sidebar), then claim this install again while that brand is selected.",
+      },
+      { status: 400 }
+    );
+  }
+
   const { data: credRow, error: upErr } = await admin
     .from("shopify_credentials")
     .upsert(
@@ -124,8 +156,9 @@ export async function handleClaim(req: Request, parsedBody?: unknown): Promise<R
         user_id: user.id,
         shop_domain: shopHost,
         access_token: pending.access_token as string,
+        brand_id: resolvedBrandId,
       },
-      { onConflict: "user_id,shop_domain" }
+      { onConflict: "user_id,brand_id" }
     )
     .select("id")
     .single();

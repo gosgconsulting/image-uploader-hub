@@ -20,6 +20,8 @@ export type ClaimShopifyInstallInput = {
   shop?: string;
   /** UUID from ?shopify_claim= on the OAuth return URL (preferred) */
   claimNonce?: string;
+  /** Dashboard brand to attach the install to (recommended; server falls back to first brand). */
+  brandId?: string;
 };
 
 /**
@@ -45,9 +47,11 @@ export async function claimShopifyInstall(
     return { ok: false, error: "Sign in to link this shop." };
   }
 
-  const body: { shop?: string; claimNonce?: string } = {};
+  const brandId = opts.brandId?.trim();
+  const body: { shop?: string; claimNonce?: string; brand_id?: string } = {};
   if (claimNonce) body.claimNonce = claimNonce;
   if (domain) body.shop = domain;
+  if (brandId) body.brand_id = brandId;
 
   const { data, error } = await supabase.functions.invoke<{
     ok?: boolean;
@@ -84,7 +88,8 @@ export type BeginShopifyManualOAuthResult =
  * Passes the current Supabase session (if any) so the callback can attach the token to the user.
  */
 export async function beginShopifyManualOAuth(
-  shop: string
+  shop: string,
+  brandId?: string
 ): Promise<BeginShopifyManualOAuthResult> {
   const domain = normalizeShopDomain(shop.trim());
   if (!domain.endsWith(".myshopify.com")) {
@@ -95,16 +100,29 @@ export async function beginShopifyManualOAuth(
     data: { session },
   } = await supabase.auth.getSession();
 
+  if (session?.user && !brandId?.trim()) {
+    return {
+      ok: false,
+      error: "Select a brand in the dashboard before starting Shopify OAuth.",
+    };
+  }
+
   const headers: Record<string, string> = {};
   if (session?.access_token) {
     headers.Authorization = `Bearer ${session.access_token}`;
   }
 
+  const body: { action: string; shop: string; brand_id?: string } = {
+    action: "begin_oauth",
+    shop: domain,
+  };
+  if (brandId?.trim()) body.brand_id = brandId.trim();
+
   const { data, error } = await supabase.functions.invoke<{
     authorize_url?: string;
     error?: string;
   }>("shopify-oauth", {
-    body: { action: "begin_oauth", shop: domain },
+    body,
     headers,
   });
 

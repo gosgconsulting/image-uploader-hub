@@ -28,6 +28,9 @@ export function mergeShopifyOAuthParamsFromLocation(
 /** Keys for linking Shopify OAuth to a signed-in Supabase user (session + local for durability). */
 export const SS_SHOPIFY_CLAIM_NONCE = "shopify_pending_claim_nonce";
 export const SS_SHOPIFY_CLAIM_SHOP = "shopify_pending_claim_shop";
+/** Dashboard brand UUID: persisted with a deferred OAuth claim and when starting manual OAuth. */
+export const LS_SHOPIFY_CLAIM_BRAND_ID = "shopify_pending_claim_brand_id";
+export const LS_SHOPIFY_OAUTH_TARGET_BRAND_ID = "shopify_oauth_target_brand_id";
 
 /** `shopify_credentials.id` after OAuth redirect or Supabase hydrate (signed-in flows). */
 export const LS_SHOPIFY_CONNECTION_ID = "shopify_connection_id";
@@ -38,11 +41,15 @@ export const LS_SHOPIFY_CONNECTION_ID = "shopify_connection_id";
  */
 export function writePendingClaimToDurableStorage(
   claimNonce: string,
-  shopDomain: string
+  shopDomain: string,
+  claimBrandId?: string
 ): void {
   try {
     if (claimNonce) localStorage.setItem(SS_SHOPIFY_CLAIM_NONCE, claimNonce);
     if (shopDomain) localStorage.setItem(SS_SHOPIFY_CLAIM_SHOP, shopDomain);
+    if (claimBrandId?.trim()) {
+      localStorage.setItem(LS_SHOPIFY_CLAIM_BRAND_ID, claimBrandId.trim());
+    }
   } catch {
     /* quota / private mode */
   }
@@ -50,11 +57,15 @@ export function writePendingClaimToDurableStorage(
 
 export function writePendingClaimToSessionStorage(
   claimNonce: string,
-  shopDomain: string
+  shopDomain: string,
+  claimBrandId?: string
 ): void {
   try {
     if (claimNonce) sessionStorage.setItem(SS_SHOPIFY_CLAIM_NONCE, claimNonce);
     if (shopDomain) sessionStorage.setItem(SS_SHOPIFY_CLAIM_SHOP, shopDomain);
+    if (claimBrandId?.trim()) {
+      sessionStorage.setItem(LS_SHOPIFY_CLAIM_BRAND_ID, claimBrandId.trim());
+    }
   } catch {
     /* */
   }
@@ -74,6 +85,44 @@ export function readPendingClaimNonce(): string {
   }
 }
 
+export function readPendingClaimBrandId(): string {
+  try {
+    const s = sessionStorage.getItem(LS_SHOPIFY_CLAIM_BRAND_ID);
+    if (s) return s;
+  } catch {
+    /* */
+  }
+  try {
+    return localStorage.getItem(LS_SHOPIFY_CLAIM_BRAND_ID) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function readOAuthTargetBrandId(): string {
+  try {
+    return localStorage.getItem(LS_SHOPIFY_OAUTH_TARGET_BRAND_ID) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeOAuthTargetBrandId(brandId: string): void {
+  try {
+    if (brandId.trim()) localStorage.setItem(LS_SHOPIFY_OAUTH_TARGET_BRAND_ID, brandId.trim());
+  } catch {
+    /* */
+  }
+}
+
+export function clearOAuthTargetBrandId(): void {
+  try {
+    localStorage.removeItem(LS_SHOPIFY_OAUTH_TARGET_BRAND_ID);
+  } catch {
+    /* */
+  }
+}
+
 export function readPendingClaimShop(): string {
   try {
     const s = sessionStorage.getItem(SS_SHOPIFY_CLAIM_SHOP);
@@ -89,7 +138,7 @@ export function readPendingClaimShop(): string {
 }
 
 export function clearPendingClaimStorage(): void {
-  for (const k of [SS_SHOPIFY_CLAIM_NONCE, SS_SHOPIFY_CLAIM_SHOP]) {
+  for (const k of [SS_SHOPIFY_CLAIM_NONCE, SS_SHOPIFY_CLAIM_SHOP, LS_SHOPIFY_CLAIM_BRAND_ID]) {
     try {
       sessionStorage.removeItem(k);
     } catch {

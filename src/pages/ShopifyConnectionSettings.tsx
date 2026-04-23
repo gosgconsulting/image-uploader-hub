@@ -11,6 +11,7 @@ export default function ShopifyConnectionSettings() {
     handleShopifyAfterSave,
     shopifyLiveConnectionStatus,
     shopifyLiveConnectionError,
+    activeShopifyBrandId,
   } = useShopifyConnection();
 
   return (
@@ -36,6 +37,7 @@ export default function ShopifyConnectionSettings() {
         onAfterSave={handleShopifyAfterSave}
         liveConnectionStatus={shopifyLiveConnectionStatus}
         liveConnectionError={shopifyLiveConnectionError}
+        oauthBrandId={activeShopifyBrandId}
       />
     </div>
   );

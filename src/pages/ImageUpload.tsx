@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
+import { useOutletContext } from "react-router-dom";
 import { Plus, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ImportTable } from "@/components/ImportTable";
 import { NewImportDialog } from "@/components/NewImportDialog";
 import { WebhookSettings } from "@/components/WebhookSettings";
 import { supabase } from "@/integrations/supabase/client";
+import type { DashboardOutletContext } from "@/types/dashboardOutletContext";
 
 interface ImportImage {
   id: string;
@@ -30,18 +33,24 @@ function getInitialWebhookUrl(): string {
 }
 
 export default function ImageUpload() {
+  const { importBrandId } = useOutletContext<DashboardOutletContext>();
   const [imports, setImports] = useState<Import[]>([]);
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState(() => getInitialWebhookUrl());
 
   const fetchImports = useCallback(async () => {
+    if (!importBrandId) {
+      setImports([]);
+      return;
+    }
     const { data } = await supabase
       .from("imports")
       .select("*, import_images(id, file_name, file_url)")
+      .eq("brand_id", importBrandId)
       .order("created_at", { ascending: false });
 
     if (data) setImports(data as Import[]);
-  }, []);
+  }, [importBrandId]);
 
   useEffect(() => {
     fetchImports();
@@ -67,12 +76,26 @@ export default function ImageUpload() {
             webhookUrl={webhookUrl}
             onWebhookUrlChange={setWebhookUrl}
           />
-          <Button size="sm" onClick={() => setIsNewOpen(true)}>
+          <Button
+            size="sm"
+            onClick={() => setIsNewOpen(true)}
+            disabled={!importBrandId}
+          >
             <Plus className="h-3.5 w-3.5 mr-1.5" />
             New Import
           </Button>
         </div>
       </div>
+
+      {!importBrandId ? (
+        <Alert className="mb-6 max-w-lg">
+          <AlertTitle className="font-mono text-sm">Select a brand</AlertTitle>
+          <AlertDescription className="text-xs">
+            Choose <span className="font-medium">JIJI Studio</span> (or another brand) in the sidebar
+            to view and create image imports for that brand.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <ImportTable
         imports={imports}
@@ -84,6 +107,7 @@ export default function ImageUpload() {
         open={isNewOpen}
         onOpenChange={setIsNewOpen}
         onImportCreated={fetchImports}
+        brandId={importBrandId}
       />
     </div>
   );

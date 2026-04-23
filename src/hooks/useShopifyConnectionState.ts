@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  fetchShopifyCredential,
+  fetchShopifyCredentialForBrand,
   isShopifyCredentialsSupabasePersistenceEnabled,
   shouldLoadShopifyCredentialsFromSupabase,
   upsertShopifyCredential,
@@ -14,13 +14,26 @@ import { useShopifyLiveConnectionTest } from "@/hooks/useShopifyLiveConnectionTe
 import { useShopifyOAuthReturnParams } from "@/hooks/useShopifyOAuthReturnParams";
 import {
   LS_SHOPIFY_CONNECTION_ID,
+  clearOAuthTargetBrandId,
   clearPendingClaimStorage,
   mergeShopifyOAuthParamsFromLocation,
+  readOAuthTargetBrandId,
+  readPendingClaimBrandId,
   readPendingClaimNonce,
   readPendingClaimShop,
 } from "@/lib/shopifySessionKeys";
 
-export function useShopifyConnectionState() {
+function resolveClaimBrandId(activeBrandId: string | null): string | undefined {
+  const a = activeBrandId?.trim() || "";
+  if (a) return a;
+  const t = readOAuthTargetBrandId().trim();
+  if (t) return t;
+  const p = readPendingClaimBrandId().trim();
+  if (p) return p;
+  return undefined;
+}
+
+export function useShopifyConnectionState(brandId: string | null) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [shopifyShop, setShopifyShop] = useState(
     () => localStorage.getItem("shopify_shop") || ""
@@ -55,14 +68,20 @@ export function useShopifyConnectionState() {
       effectiveSearch.has("shopify_oauth") ||
       (effectiveSearch.has("shopify_claim") && effectiveSearch.has("shop"));
 
+    const claimBrand = resolveClaimBrandId(brandId);
+
     const pendingNonce = readPendingClaimNonce();
     if (session && pendingNonce && !urlDrivesClaim) {
       setShopifyLinkSignInHintShop(null);
       setShopifyClaimBusy(true);
       try {
-        const claim = await claimShopifyInstall({ claimNonce: pendingNonce });
+        const claim = await claimShopifyInstall({
+          claimNonce: pendingNonce,
+          brandId: claimBrand,
+        });
         if (claim.ok) {
           clearPendingClaimStorage();
+          clearOAuthTargetBrandId();
           setShopifyLinkSignInHintShop(null);
           if (claim.shop_domain) {
             localStorage.setItem("shopify_shop", claim.shop_domain);
@@ -86,9 +105,13 @@ export function useShopifyConnectionState() {
         setShopifyLinkSignInHintShop(null);
         setShopifyClaimBusy(true);
         try {
-          const claim = await claimShopifyInstall({ shop: pendingClaim });
+          const claim = await claimShopifyInstall({
+            shop: pendingClaim,
+            brandId: claimBrand,
+          });
           if (claim.ok) {
             clearPendingClaimStorage();
+            clearOAuthTargetBrandId();
             setShopifyLinkSignInHintShop(null);
             if (claim.shop_domain) {
               localStorage.setItem("shopify_shop", claim.shop_domain);
@@ -109,28 +132,40 @@ export function useShopifyConnectionState() {
       }
     }
 
-    const shopAfter = localStorage.getItem("shopify_shop") || "";
-    setShopifyShop(shopAfter);
-    if (session && shopAfter) {
-      const row = await fetchShopifyCredential(shopAfter);
-      setShopifyToken(
-        row?.access_token ?? localStorage.getItem("shopify_admin_token") ?? ""
-      );
-      if (row?.id) {
+    const activeBrand = brandId?.trim() || "";
+    if (session && activeBrand) {
+      const row = await fetchShopifyCredentialForBrand(activeBrand);
+      if (row) {
+        localStorage.setItem("shopify_shop", row.shop_domain);
+        setShopifyShop(row.shop_domain);
+        setShopifyToken(row.access_token ?? localStorage.getItem("shopify_admin_token") ?? "");
         localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, row.id);
         setShopifyConnectionId(row.id);
       } else if (shouldLoadShopifyCredentialsFromSupabase()) {
+        setShopifyToken("");
+        setShopifyShop("");
+        try {
+          localStorage.removeItem("shopify_shop");
+        } catch {
+          /* */
+        }
         localStorage.removeItem(LS_SHOPIFY_CONNECTION_ID);
         setShopifyConnectionId("");
+      } else {
+        const shopAfter = localStorage.getItem("shopify_shop") || "";
+        setShopifyShop(shopAfter);
+        setShopifyToken(localStorage.getItem("shopify_admin_token") ?? "");
       }
     } else {
+      const shopAfter = localStorage.getItem("shopify_shop") || "";
+      setShopifyShop(shopAfter);
       setShopifyToken(localStorage.getItem("shopify_admin_token") ?? "");
       if (session && !shopAfter) {
         localStorage.removeItem(LS_SHOPIFY_CONNECTION_ID);
         setShopifyConnectionId("");
       }
     }
-  }, [toast, setShopifyConnectionId, searchParams]);
+  }, [toast, searchParams, brandId]);
 
   useShopifyOAuthReturnParams(
     searchParams,
@@ -140,7 +175,8 @@ export function useShopifyConnectionState() {
     setShopifyShop,
     setShopifyConnectionId,
     setShopifyClaimBusy,
-    setShopifyLinkSignInHintShop
+    setShopifyLinkSignInHintShop,
+    brandId
   );
 
   useEffect(() => {
@@ -188,7 +224,16 @@ export function useShopifyConnectionState() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
+      const bid = brandId?.trim() || "";
       if (session && token.trim()) {
+        if (!bid) {
+          toast({
+            title: "Select a brand",
+            description: "Choose a brand in the sidebar before saving Shopify credentials.",
+            variant: "destructive",
+          });
+          return { serverSaved: false };
+        }
         if (!isShopifyCredentialsSupabasePersistenceEnabled()) {
           toast({
             title: "Saved locally only",
@@ -197,7 +242,7 @@ export function useShopifyConnectionState() {
           });
           return { serverSaved: false };
         }
-        const { error, credentialId } = await upsertShopifyCredential(shop, token);
+        const { error, credentialId } = await upsertShopifyCredential(shop, token, bid);
         if (!error) {
           if (credentialId) {
             localStorage.setItem(LS_SHOPIFY_CONNECTION_ID, credentialId);
@@ -223,7 +268,7 @@ export function useShopifyConnectionState() {
       }
       return { serverSaved: false };
     },
-    [toast, setShopifyConnectionId]
+    [toast, brandId]
   );
 
   const shopifyEmbeddedContextActive =
@@ -241,5 +286,6 @@ export function useShopifyConnectionState() {
     shopifyLiveConnectionError,
     shopifyClaimBusy,
     shopifyLinkSignInHintShop,
+    activeShopifyBrandId: brandId,
   };
 }

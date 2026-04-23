@@ -29,7 +29,9 @@ export function useShopifyOAuthReturnParams(
   setShopifyShop: Dispatch<SetStateAction<string>>,
   setShopifyConnectionId: Dispatch<SetStateAction<string>>,
   setShopifyClaimBusy: Dispatch<SetStateAction<boolean>>,
-  setShopifyLinkSignInHintShop: Dispatch<SetStateAction<string | null>>
+  setShopifyLinkSignInHintShop: Dispatch<SetStateAction<string | null>>,
+  /** Dashboard brand UUID used when completing an OAuth claim (may be null while brands load). */
+  oauthClaimBrandId: string | null
 ) {
   useLayoutEffect(() => {
     const live =
@@ -124,7 +126,7 @@ export function useShopifyOAuthReturnParams(
     setRefundOAuthProcLock(lockKey);
 
     if (claimNonce && UUID_RE.test(claimNonce)) {
-      writePendingClaimToDurableStorage(claimNonce, normalized);
+      writePendingClaimToDurableStorage(claimNonce, normalized, oauthClaimBrandId ?? undefined);
     }
 
     if (normalized) {
@@ -147,6 +149,7 @@ export function useShopifyOAuthReturnParams(
       setShopifyLinkSignInHintShop,
       afterClaim: clearOAuthParams,
       hydrateShopifySession,
+      claimBrandId: oauthClaimBrandId,
     });
   }, [
     searchParams,
@@ -157,6 +160,7 @@ export function useShopifyOAuthReturnParams(
     setShopifyConnectionId,
     setShopifyClaimBusy,
     setShopifyLinkSignInHintShop,
+    oauthClaimBrandId,
   ]);
 
   useEffect(() => {
@@ -194,7 +198,7 @@ export function useShopifyOAuthReturnParams(
     }
     setRefundOAuthProcLock(lockKey);
 
-    writePendingClaimToDurableStorage(claimNonce, normalized);
+    writePendingClaimToDurableStorage(claimNonce, normalized, oauthClaimBrandId ?? undefined);
 
     setShopifyShop(normalized);
     localStorage.setItem("shopify_shop", normalized);
@@ -210,6 +214,7 @@ export function useShopifyOAuthReturnParams(
       setShopifyLinkSignInHintShop,
       afterClaim: clearBareParams,
       hydrateShopifySession,
+      claimBrandId: oauthClaimBrandId,
     });
   }, [
     searchParams,
@@ -220,5 +225,6 @@ export function useShopifyOAuthReturnParams(
     setShopifyConnectionId,
     setShopifyClaimBusy,
     setShopifyLinkSignInHintShop,
+    oauthClaimBrandId,
   ]);
 }

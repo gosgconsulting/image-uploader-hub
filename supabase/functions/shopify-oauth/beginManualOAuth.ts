@@ -55,6 +55,27 @@ export async function handleBeginManualOAuth(
     if (!error && user) userId = user.id;
   }
 
+  const brandRaw = typeof parsed.brand_id === "string" ? parsed.brand_id.trim() : "";
+  let brandId: string | null = null;
+  if (userId) {
+    if (!brandRaw) {
+      return json(
+        { error: "Select a brand in the dashboard, then start Shopify OAuth again." },
+        400
+      );
+    }
+    const { data: owned, error: brandErr } = await admin
+      .from("brands")
+      .select("id")
+      .eq("id", brandRaw)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (brandErr || !owned?.id) {
+      return json({ error: "Invalid or unknown brand for this account." }, 400);
+    }
+    brandId = String(owned.id);
+  }
+
   const state = randomStateToken();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
@@ -63,6 +84,7 @@ export async function handleBeginManualOAuth(
     user_id: userId,
     shop_domain: host,
     expires_at: expiresAt,
+    brand_id: brandId,
   });
 
   if (insErr) {

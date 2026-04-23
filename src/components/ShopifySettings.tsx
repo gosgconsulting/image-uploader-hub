@@ -16,6 +16,7 @@ import {
 } from "@/lib/shopify-credentials";
 import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
 import { beginShopifyManualOAuth, isShopifyOAuthEnabled } from "@/lib/shopifyOAuth";
+import { writeOAuthTargetBrandId } from "@/lib/shopifySessionKeys";
 import type { ShopifyLiveConnectionStatus } from "@/hooks/useShopifyLiveConnectionTest";
 import { ShopifySettingsStatusBlock } from "@/components/ShopifySettingsStatusBlock";
 
@@ -31,6 +32,8 @@ interface ShopifySettingsProps {
   liveConnectionError?: string | null;
   /** `popover`: header trigger + popover. `inline`: full-width card for settings page. */
   layout?: "popover" | "inline";
+  /** Required for signed-in manual OAuth so the token is stored on the correct brand row. */
+  oauthBrandId?: string | null;
 }
 
 export function ShopifySettings({
@@ -42,6 +45,7 @@ export function ShopifySettings({
   liveConnectionStatus,
   liveConnectionError,
   layout = "popover",
+  oauthBrandId,
 }: ShopifySettingsProps) {
   const [shopValue, setShopValue] = useState(shop);
   const [tokenValue, setTokenValue] = useState(adminAccessToken);
@@ -72,7 +76,10 @@ export function ShopifySettings({
           setConnectionError("Enter your shop domain to connect with Shopify.");
           return;
         }
-        const started = await beginShopifyManualOAuth(s);
+        if (oauthBrandId?.trim()) {
+          writeOAuthTargetBrandId(oauthBrandId.trim());
+        }
+        const started = await beginShopifyManualOAuth(s, oauthBrandId ?? undefined);
         if (started.ok === false) {
           setConnectionError(started.error);
           return;

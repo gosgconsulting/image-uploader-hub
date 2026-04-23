@@ -4,7 +4,10 @@ import { claimShopifyInstall } from "@/lib/shopifyOAuth";
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 import {
   LS_SHOPIFY_CONNECTION_ID,
+  clearOAuthTargetBrandId,
   clearPendingClaimStorage,
+  readOAuthTargetBrandId,
+  readPendingClaimBrandId,
   writePendingClaimToDurableStorage,
   writePendingClaimToSessionStorage,
 } from "@/lib/shopifySessionKeys";
@@ -32,8 +35,23 @@ export async function completeShopifyInstallClaimFlow(opts: {
   toast: ToastFn;
   setShopifyShop: Dispatch<SetStateAction<string>>;
   setShopifyConnectionId: Dispatch<SetStateAction<string>>;
+  /** Dashboard brand UUID for linking the install (falls back to durable OAuth keys). */
+  claimBrandId?: string | null;
 }): Promise<ShopifyInstallClaimFlowOutcome> {
-  const { claimNonce, normalized, toast, setShopifyShop, setShopifyConnectionId } = opts;
+  const {
+    claimNonce,
+    normalized,
+    toast,
+    setShopifyShop,
+    setShopifyConnectionId,
+    claimBrandId,
+  } = opts;
+
+  const brandForClaim =
+    claimBrandId?.trim() ||
+    readOAuthTargetBrandId().trim() ||
+    readPendingClaimBrandId().trim() ||
+    undefined;
   refundOAuthDebugLog("claim_flow_start", {
     claim_nonce: claimNonce || null,
     shop: normalized || null,
@@ -50,8 +68,8 @@ export async function completeShopifyInstallClaimFlow(opts: {
       shop: normalized || null,
       shopify_admin_url: normalized ? `https://${normalized}` : null,
     });
-    writePendingClaimToDurableStorage(claimNonce, normalized);
-    writePendingClaimToSessionStorage(claimNonce, normalized);
+    writePendingClaimToDurableStorage(claimNonce, normalized, brandForClaim);
+    writePendingClaimToSessionStorage(claimNonce, normalized, brandForClaim);
     toast({
       title: "Almost done",
       description:
@@ -63,10 +81,12 @@ export async function completeShopifyInstallClaimFlow(opts: {
   const claimResult = await claimShopifyInstall({
     claimNonce: claimNonce || undefined,
     shop: normalized || undefined,
+    brandId: brandForClaim,
   });
 
   if (claimResult.ok) {
     clearPendingClaimStorage();
+    clearOAuthTargetBrandId();
     if (claimResult.shop_domain) {
       localStorage.setItem("shopify_shop", claimResult.shop_domain);
       setShopifyShop(claimResult.shop_domain);

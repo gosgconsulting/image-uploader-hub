@@ -18,7 +18,7 @@ export function isShopifyCredentialsSupabasePersistenceEnabled(): boolean {
 }
 
 /**
- * When false, `fetchShopifyCredential` does not query Supabase (env disables reads).
+ * When false, `fetchShopifyCredentialForBrand` does not query Supabase (env disables reads).
  * Hydration must not treat a null fetch as “no credentials” or it will wipe IDs set by OAuth claim.
  */
 export function shouldLoadShopifyCredentialsFromSupabase(): boolean {
@@ -37,27 +37,30 @@ export function hasShopifyAdminCredentials(shop: string, adminAccessToken: strin
   return Boolean(adminAccessToken?.trim());
 }
 
-export async function fetchShopifyCredential(
-  shopDomain: string
-): Promise<{ access_token: string; id: string } | null> {
+export async function fetchShopifyCredentialForBrand(
+  brandId: string
+): Promise<{ access_token: string; id: string; shop_domain: string } | null> {
   if (!shouldLoadShopifyCredentialsFromSupabase()) return null;
-
-  const domain = normalizeShopDomain(shopDomain);
-  if (!domain) return null;
+  if (!brandId.trim()) return null;
 
   const { data, error } = await supabase
     .from("shopify_credentials")
-    .select("id, access_token")
-    .eq("shop_domain", domain)
+    .select("id, access_token, shop_domain")
+    .eq("brand_id", brandId.trim())
     .maybeSingle();
 
-  if (error || !data?.access_token || !data.id) return null;
-  return { access_token: data.access_token, id: data.id };
+  if (error || !data?.access_token || !data.id || !data.shop_domain) return null;
+  return {
+    access_token: data.access_token,
+    id: data.id,
+    shop_domain: data.shop_domain,
+  };
 }
 
 export async function upsertShopifyCredential(
   shopDomain: string,
-  accessToken: string
+  accessToken: string,
+  brandId: string
 ): Promise<{ error: Error | null; credentialId?: string }> {
   if (!isShopifyCredentialsSupabasePersistenceEnabled()) {
     return { error: null, credentialId: undefined };
@@ -66,6 +69,9 @@ export async function upsertShopifyCredential(
   const domain = normalizeShopDomain(shopDomain);
   if (!domain || !accessToken.trim()) {
     return { error: new Error("Shop domain and access token are required") };
+  }
+  if (!brandId.trim()) {
+    return { error: new Error("Select a brand before saving Shopify credentials") };
   }
 
   const {
@@ -84,8 +90,9 @@ export async function upsertShopifyCredential(
         user_id: session.user.id,
         shop_domain: domain,
         access_token: accessToken.trim(),
+        brand_id: brandId.trim(),
       },
-      { onConflict: "user_id,shop_domain" }
+      { onConflict: "user_id,brand_id" }
     )
     .select("id")
     .single();

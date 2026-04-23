@@ -5,8 +5,15 @@ export type ShopifyConnectionContextValue = ReturnType<typeof useShopifyConnecti
 
 const ShopifyConnectionContext = createContext<ShopifyConnectionContextValue | null>(null);
 
-export function ShopifyConnectionProvider({ children }: { children: ReactNode }) {
-  const value = useShopifyConnectionState();
+export function ShopifyConnectionProvider({
+  children,
+  brandId,
+}: {
+  children: ReactNode;
+  /** Dashboard brand; Shopify credentials are loaded and saved per brand. */
+  brandId: string | null;
+}) {
+  const value = useShopifyConnectionState(brandId);
   return (
     <ShopifyConnectionContext.Provider value={value}>
       {children}
