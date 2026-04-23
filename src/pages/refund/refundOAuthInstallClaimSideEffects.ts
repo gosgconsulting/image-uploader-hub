@@ -2,7 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 import { completeShopifyInstallClaimFlow } from "./completeShopifyInstallClaimFlow";
 import { clearRefundOAuthProcLock } from "./refundOAuthProcLock";
-import { readPendingClaimShop } from "./shopifyRefundSessionKeys";
+import { readPendingClaimShop } from "@/lib/shopifySessionKeys";
 
 type ToastFn = (props: ToastProps & { action?: ToastActionElement }) => void;
 

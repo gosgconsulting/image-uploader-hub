@@ -7,21 +7,20 @@ import {
   shouldLoadShopifyCredentialsFromSupabase,
   upsertShopifyCredential,
 } from "@/lib/shopify-credentials";
-import { normalizeShopDomain } from "@/lib/shopifyAdminApi";
 import { shopDomainFromEmbeddedAppSearch } from "@/lib/shopifyEmbeddedContext";
 import { supabase } from "@/integrations/supabase/client";
 import { claimShopifyInstall } from "@/lib/shopifyOAuth";
 import { useShopifyLiveConnectionTest } from "@/hooks/useShopifyLiveConnectionTest";
-import { useRefundShopifyOAuthReturnParams } from "@/pages/refund/useRefundShopifyOAuthReturnParams";
+import { useShopifyOAuthReturnParams } from "@/hooks/useShopifyOAuthReturnParams";
 import {
   LS_SHOPIFY_CONNECTION_ID,
   clearPendingClaimStorage,
   mergeShopifyOAuthParamsFromLocation,
   readPendingClaimNonce,
   readPendingClaimShop,
-} from "@/pages/refund/shopifyRefundSessionKeys";
+} from "@/lib/shopifySessionKeys";
 
-export function useRefundShopifySession() {
+export function useShopifyConnectionState() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [shopifyShop, setShopifyShop] = useState(
     () => localStorage.getItem("shopify_shop") || ""
@@ -133,7 +132,7 @@ export function useRefundShopifySession() {
     }
   }, [toast, setShopifyConnectionId, searchParams]);
 
-  useRefundShopifyOAuthReturnParams(
+  useShopifyOAuthReturnParams(
     searchParams,
     setSearchParams,
     toast,

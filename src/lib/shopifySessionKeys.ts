@@ -9,7 +9,7 @@ export const SHOPIFY_OAUTH_RETURN_PARAM_KEYS = [
 
 /**
  * Some hosts / first-paint timing leave `window.location.search` populated while
- * `useSearchParams()` is still empty. Merge so Refund can claim the install nonce.
+ * `useSearchParams()` is still empty. Merge so OAuth return handling sees the full query.
  */
 export function mergeShopifyOAuthParamsFromLocation(
   fromRouter: URLSearchParams
@@ -33,7 +33,7 @@ export const SS_SHOPIFY_CLAIM_SHOP = "shopify_pending_claim_shop";
 export const LS_SHOPIFY_CONNECTION_ID = "shopify_connection_id";
 
 /**
- * Persist claim handoff on the app origin (Refund is a standalone page, not embedded in Admin).
+ * Persist claim handoff on the app origin (standalone app, not only embedded in Admin).
  * Prefer localStorage so the nonce survives reloads and isn’t tied to a discarded iframe during OAuth.
  */
 export function writePendingClaimToDurableStorage(

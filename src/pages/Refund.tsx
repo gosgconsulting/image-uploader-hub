@@ -2,14 +2,12 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DollarSign, Plus, Loader2 } from "lucide-react";
 import { RefundTable } from "@/components/RefundTable";
-import { ShopifySettings } from "@/components/ShopifySettings";
 import { RefundImportDialog } from "@/components/RefundImportDialog";
 import { RefundFilters } from "@/components/RefundFilters";
 import { BulkRefundDialog } from "@/components/BulkRefundDialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useRefundShopifySession } from "@/pages/refund/useRefundShopifySession";
+import { useShopifyConnection } from "@/components/ShopifyConnectionProvider";
 import { useRefundRecords } from "@/pages/refund/useRefundRecords";
 import { useRefundBulkSelection } from "@/pages/refund/useRefundBulkSelection";
 import { RefundPagination } from "@/pages/refund/RefundPagination";
@@ -17,6 +15,7 @@ import { RefundPagination } from "@/pages/refund/RefundPagination";
 const AUTH_REFUND = "/auth?next=%2Frefund";
 const REFUND_PAGE_SIZE = 20;
 const AUTH_SIGNUP_REFUND = "/auth?next=%2Frefund&tab=sign-up";
+const SHOPIFY_SETTINGS = "/shopify-settings";
 
 export default function Refund() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -25,24 +24,18 @@ export default function Refund() {
 
   const {
     shopifyShop,
-    setShopifyShop,
     shopifyToken,
-    setShopifyToken,
     shopifyConnectionId,
-    handleShopifyAfterSave,
     shopifyEmbeddedContextActive,
     shopifyLiveConnectionStatus,
     shopifyLiveConnectionError,
     shopifyClaimBusy,
     shopifyLinkSignInHintShop,
-  } = useRefundShopifySession();
+  } = useShopifyConnection();
 
   const embeddedHost = shopifyEmbeddedContextActive
     ? searchParams.get("host")
     : null;
-
-  const needsManualShopifySettings =
-    !shopifyEmbeddedContextActive || !shopifyToken.trim();
 
   const {
     loadError,
@@ -140,31 +133,6 @@ export default function Refund() {
               onDateSortChange={setDateSort}
               onClearFilters={handleClearFilters}
             />
-            {needsManualShopifySettings ? (
-              <ShopifySettings
-                shop={shopifyShop}
-                adminAccessToken={shopifyToken}
-                onShopChange={setShopifyShop}
-                onAdminTokenChange={setShopifyToken}
-                onAfterSave={handleShopifyAfterSave}
-                liveConnectionStatus={shopifyLiveConnectionStatus}
-                liveConnectionError={shopifyLiveConnectionError}
-              />
-            ) : (
-              <div className="flex items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className="font-mono text-xs max-w-[min(280px,40vw)] truncate"
-                  title={
-                    shopifyConnectionId
-                      ? `${shopifyShop} · connection ${shopifyConnectionId}`
-                      : shopifyShop || undefined
-                  }
-                >
-                  {shopifyShop || "Store"}
-                </Badge>
-              </div>
-            )}
           </div>
         </div>
 
@@ -186,9 +154,12 @@ export default function Refund() {
                 OAuth data for{" "}
                 <span className="font-mono text-foreground">{shopifyLinkSignInHintShop}</span> is only
                 stored in this browser. Saving it for server-side refunds needs an authenticated session
-                in this browser—if you prefer not to sign in, use{" "}
-                <span className="text-foreground">Shopify settings</span> and paste your Admin API token
-                instead (local only without a session). After you sign in, return here and linking
+                in this browser—if you prefer not to sign in, open{" "}
+                <Link className="font-medium text-foreground underline-offset-4 hover:underline" to={SHOPIFY_SETTINGS}>
+                  Shopify connection
+                </Link>{" "}
+                and paste your Admin API token instead (local only without a session). After you sign in,
+                return here and linking
                 completes automatically.
               </p>
               <div className="flex flex-wrap gap-2">

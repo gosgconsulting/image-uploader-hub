@@ -7,10 +7,10 @@ import {
   SHOPIFY_OAUTH_RETURN_PARAM_KEYS,
   mergeShopifyOAuthParamsFromLocation,
   writePendingClaimToDurableStorage,
-} from "./shopifyRefundSessionKeys";
-import { refundOAuthDebugLog } from "./completeShopifyInstallClaimFlow";
-import { runRefundOAuthInstallClaimSideEffects } from "./refundOAuthInstallClaimSideEffects";
-import { isRefundOAuthProcLockBusy, setRefundOAuthProcLock } from "./refundOAuthProcLock";
+} from "@/lib/shopifySessionKeys";
+import { refundOAuthDebugLog } from "@/pages/refund/completeShopifyInstallClaimFlow";
+import { runRefundOAuthInstallClaimSideEffects } from "@/pages/refund/refundOAuthInstallClaimSideEffects";
+import { isRefundOAuthProcLockBusy, setRefundOAuthProcLock } from "@/pages/refund/refundOAuthProcLock";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,10 +18,10 @@ const UUID_RE =
 type ToastFn = (props: ToastProps & { action?: ToastActionElement }) => void;
 
 /**
- * Handles `?shopify_oauth=...` after Shopify redirects to Refund, and bare
+ * Handles `?shopify_oauth=...` after Shopify redirects to the app, and bare
  * `?shop=…&shopify_claim=…` (e.g. bookmarks or OAuth return without `shopify_oauth=`).
  */
-export function useRefundShopifyOAuthReturnParams(
+export function useShopifyOAuthReturnParams(
   searchParams: URLSearchParams,
   setSearchParams: SetURLSearchParams,
   toast: ToastFn,
@@ -63,7 +63,10 @@ export function useRefundShopifyOAuthReturnParams(
     refundOAuthDebugLog("oauth_query_detected", {
       shopify_oauth: o,
       current_url: typeof window !== "undefined" ? window.location.href : null,
-      redirect_url_effective: typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}${window.location.search}` : null,
+      redirect_url_effective:
+        typeof window !== "undefined"
+          ? `${window.location.origin}${window.location.pathname}${window.location.search}`
+          : null,
       shop,
       shopify_admin_url: shop ? `https://${shop}` : null,
       claim_nonce: claimNonce || null,

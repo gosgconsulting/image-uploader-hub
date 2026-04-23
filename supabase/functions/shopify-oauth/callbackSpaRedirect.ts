@@ -8,15 +8,15 @@ export type SpaRedirectMeta = {
 };
 
 /**
- * OAuth completion is handled on the SPA `/refund` route (`useRefundShopifyOAuthReturnParams`).
- * If `SHOPIFY_OAUTH_RETURN_URL` is only the site origin (pathname `/`), query params would
- * land on `/` and are lost when the user opens Refund.
+ * OAuth completion is handled on the SPA (dashboard `ShopifyConnectionProvider` +
+ * `useShopifyOAuthReturnParams`). If `SHOPIFY_OAUTH_RETURN_URL` is only the site origin
+ * (pathname `/`), query params would land on `/` and are lost before settings load.
  */
 export function oauthReturnTargetUrl(returnUrlRaw: string): URL {
   const u = new URL(returnUrlRaw.trim());
   const path = u.pathname.replace(/\/+$/, "") || "/";
   if (path === "/") {
-    u.pathname = "/refund";
+    u.pathname = "/shopify-settings";
     u.hash = "";
   } else {
     u.pathname = path;

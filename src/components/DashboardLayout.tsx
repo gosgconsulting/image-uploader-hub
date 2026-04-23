@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
-import { DollarSign, Package, LogOut, ChevronsUpDown, Check, Building2 } from "lucide-react";
+import { DollarSign, Package, Store, LogOut, ChevronsUpDown, Check, Building2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,10 +12,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { ShopifyConnectionProvider } from "@/components/ShopifyConnectionProvider";
 
 const navItems = [
   { label: "Image Upload", to: "/image-upload", icon: Package },
   { label: "Refund", to: "/refund", icon: DollarSign },
+  { label: "Shopify", to: "/shopify-settings", icon: Store },
 ];
 
 const brands = [
@@ -131,7 +133,9 @@ export function DashboardLayout() {
 
       {/* Content offset to clear the fixed sidebar */}
       <main className="flex-1 ml-[232px] overflow-auto">
-        <Outlet />
+        <ShopifyConnectionProvider>
+          <Outlet />
+        </ShopifyConnectionProvider>
       </main>
     </div>
   );
