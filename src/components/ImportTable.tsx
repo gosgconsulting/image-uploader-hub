@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { format } from "date-fns";
 import { Send, Eye, Loader2, Image as ImageIcon, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,28 +21,34 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ImagePreviewDialog } from "@/components/ImagePreviewDialog";
-import { SendApprovalDialog, WebhookProduct } from "@/components/SendApprovalDialog";
+import {
+  SendApprovalDialog,
+  type SendApprovalImport,
+  WebhookProduct,
+} from "@/components/SendApprovalDialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { deleteImportWithStorage } from "@/lib/delete-import";
 
-interface ImportImage {
+export interface ImportImage {
   id: string;
   file_name: string;
   file_url: string;
 }
 
-interface Import {
+/** Row from `imports_with_list_preview` (list page). */
+export interface ImportListRow {
   id: string;
   batch_name: string | null;
   status: string;
   webhook_url: string | null;
   created_at: string;
-  import_images: ImportImage[];
+  image_count: number;
+  preview_images: ImportImage[];
 }
 
 interface ImportTableProps {
-  imports: Import[];
+  imports: ImportListRow[];
   webhookUrl: string;
   onStatusChange: () => void;
 }
@@ -57,6 +63,142 @@ const statusVariant: Record<
   failed: "destructive",
 };
 
+type ImportTableRowProps = {
+  imp: ImportListRow;
+  sendingId: string | null;
+  deletingId: string | null;
+  onPreview: (imp: ImportListRow) => void;
+  onSend: (imp: ImportListRow) => void;
+  onDelete: (imp: ImportListRow) => void;
+};
+
+const ImportTableRow = memo(function ImportTableRow({
+  imp,
+  sendingId,
+  deletingId,
+  onPreview,
+  onSend,
+  onDelete,
+}: ImportTableRowProps) {
+  const isSending = sendingId === imp.id;
+  const isDeleting = deletingId === imp.id;
+  const deleteDisabled =
+    deletingId !== null || isSending || imp.status === "processing";
+
+  return (
+    <TableRow>
+      <TableCell className="font-mono text-xs tabular-nums">
+        {format(new Date(imp.created_at), "MMM dd, HH:mm")}
+      </TableCell>
+      <TableCell className="text-sm">
+        {imp.batch_name || (
+          <span className="text-muted-foreground italic">Untitled</span>
+        )}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          {imp.preview_images.length > 0 && (
+            <div className="flex -space-x-2 isolate">
+              {imp.preview_images.map((img) => (
+                <div
+                  key={img.id}
+                  className="h-8 w-8 shrink-0 rounded border-2 border-card bg-muted overflow-hidden"
+                >
+                  <img
+                    src={img.file_url}
+                    alt={img.file_name}
+                    className="h-full w-full object-cover pointer-events-none"
+                    loading="lazy"
+                    decoding="async"
+                    draggable={false}
+                  />
+                </div>
+              ))}
+              {imp.image_count > imp.preview_images.length && (
+                <div className="h-8 w-8 shrink-0 rounded border-2 border-card bg-muted flex items-center justify-center">
+                  <span className="text-[10px] font-mono text-muted-foreground">
+                    +{imp.image_count - imp.preview_images.length}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+          <span className="text-xs text-muted-foreground font-mono">
+            {imp.image_count}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Badge
+          variant={statusVariant[imp.status] || "outline"}
+          className="font-mono text-[10px] uppercase"
+        >
+          {imp.status}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() => onPreview(imp)}
+            disabled={imp.image_count === 0}
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() => onSend(imp)}
+            disabled={isSending || imp.status === "processing"}
+          >
+            {isSending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() => onDelete(imp)}
+            disabled={deleteDisabled}
+            aria-label="Delete import"
+          >
+            {isDeleting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+            )}
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+});
+
+export function parsePreviewImagesJson(raw: unknown): ImportImage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ImportImage[] = [];
+  for (const el of raw) {
+    if (!el || typeof el !== "object") continue;
+    const o = el as Record<string, unknown>;
+    const id = String(o.id ?? "");
+    const file_name = String(o.file_name ?? "");
+    const file_url = String(o.file_url ?? "");
+    if (!file_url) continue;
+    out.push({
+      id: id || `${file_name}:${file_url}`,
+      file_name,
+      file_url,
+    });
+  }
+  return out;
+}
+
 export function ImportTable({
   imports,
   webhookUrl,
@@ -64,12 +206,51 @@ export function ImportTable({
 }: ImportTableProps) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Import | null>(null);
-  const [previewImport, setPreviewImport] = useState<Import | null>(null);
-  const [approvalImport, setApprovalImport] = useState<Import | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ImportListRow | null>(null);
+  const [preview, setPreview] = useState<{
+    batchName: string;
+    images: ImportImage[];
+    loading: boolean;
+  } | null>(null);
+  const [approvalImport, setApprovalImport] = useState<ImportListRow | null>(
+    null,
+  );
   const { toast } = useToast();
 
-  const handleTriggerWebhook = async (imp: Import, products: WebhookProduct[]) => {
+  const openPreview = useCallback((imp: ImportListRow) => {
+    setPreview({
+      batchName: imp.batch_name || "Import",
+      images: [],
+      loading: true,
+    });
+    void (async () => {
+      const { data, error } = await supabase
+        .from("import_images")
+        .select("id, file_name, file_url")
+        .eq("import_id", imp.id)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        toast({
+          title: "Could not load images",
+          description: error.message,
+          variant: "destructive",
+        });
+        setPreview(null);
+        return;
+      }
+      setPreview({
+        batchName: imp.batch_name || "Import",
+        images: (data ?? []) as ImportImage[],
+        loading: false,
+      });
+    })();
+  }, [toast]);
+
+  const handleTriggerWebhook = useCallback(async (
+    imp: SendApprovalImport,
+    products: WebhookProduct[],
+  ) => {
     const url = imp.webhook_url || webhookUrl;
     if (!url) {
       toast({
@@ -130,9 +311,9 @@ export function ImportTable({
     } finally {
       setSendingId(null);
     }
-  };
+  }, [webhookUrl, onStatusChange, toast]);
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     setDeletingId(deleteTarget.id);
     const result = await deleteImportWithStorage(supabase, deleteTarget.id);
@@ -151,7 +332,7 @@ export function ImportTable({
       title: "Import deleted",
       description: "The import and its images were removed.",
     });
-  };
+  }, [deleteTarget, onStatusChange, toast]);
 
   if (imports.length === 0) {
     return (
@@ -188,109 +369,28 @@ export function ImportTable({
           </TableHeader>
           <TableBody>
             {imports.map((imp) => (
-              <TableRow key={imp.id}>
-                <TableCell className="font-mono text-xs tabular-nums">
-                  {format(new Date(imp.created_at), "MMM dd, HH:mm")}
-                </TableCell>
-                <TableCell className="text-sm">
-                  {imp.batch_name || (
-                    <span className="text-muted-foreground italic">
-                      Untitled
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    {imp.import_images.length > 0 && (
-                      <div className="flex -space-x-2">
-                        {imp.import_images.slice(0, 3).map((img) => (
-                          <div
-                            key={img.id}
-                            className="h-8 w-8 rounded border-2 border-card bg-muted overflow-hidden"
-                          >
-                            <img
-                              src={img.file_url}
-                              alt={img.file_name}
-                              className="h-full w-full object-cover"
-                            />
-                          </div>
-                        ))}
-                        {imp.import_images.length > 3 && (
-                          <div className="h-8 w-8 rounded border-2 border-card bg-muted flex items-center justify-center">
-                            <span className="text-[10px] font-mono text-muted-foreground">
-                              +{imp.import_images.length - 3}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {imp.import_images.length}
-                    </span>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={statusVariant[imp.status] || "outline"}
-                    className="font-mono text-[10px] uppercase"
-                  >
-                    {imp.status}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPreviewImport(imp)}
-                      disabled={imp.import_images.length === 0}
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                     <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setApprovalImport(imp)}
-                        disabled={
-                          sendingId === imp.id || imp.status === "processing"
-                        }
-                      >
-                        {sendingId === imp.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeleteTarget(imp)}
-                      disabled={
-                        deletingId !== null ||
-                        sendingId === imp.id ||
-                        imp.status === "processing"
-                      }
-                      aria-label="Delete import"
-                    >
-                      {deletingId === imp.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      )}
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
+              <ImportTableRow
+                key={imp.id}
+                imp={imp}
+                sendingId={sendingId}
+                deletingId={deletingId}
+                onPreview={openPreview}
+                onSend={setApprovalImport}
+                onDelete={setDeleteTarget}
+              />
             ))}
           </TableBody>
         </Table>
       </div>
 
       <ImagePreviewDialog
-        open={!!previewImport}
-        onOpenChange={() => setPreviewImport(null)}
-        images={previewImport?.import_images || []}
-        batchName={previewImport?.batch_name || "Import"}
+        open={!!preview}
+        onOpenChange={(open) => {
+          if (!open) setPreview(null);
+        }}
+        images={preview?.images || []}
+        batchName={preview?.batchName || "Import"}
+        loading={preview?.loading ?? false}
       />
 
       <SendApprovalDialog

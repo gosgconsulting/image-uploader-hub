@@ -332,7 +332,28 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      imports_with_list_preview: {
+        Row: {
+          id: string
+          brand_id: string | null
+          batch_name: string | null
+          status: string
+          webhook_url: string | null
+          created_at: string
+          updated_at: string
+          image_count: number
+          preview_images: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "imports_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       upsert_brand_shopify_partner_app: {

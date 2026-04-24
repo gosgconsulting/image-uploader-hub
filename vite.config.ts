@@ -108,8 +108,16 @@ export default defineConfig({
   },
   plugins: [react(), shopifyAdminProxy()],
   resolve: {
+    // @tanstack/react-virtual uses `import * as React from 'react'`; without dedupe,
+    // dev pre-bundling can load a second React copy and `React` is null → useReducer crash.
+    dedupe: ["react", "react-dom"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      react: path.resolve(__dirname, "./node_modules/react"),
+      "react-dom": path.resolve(__dirname, "./node_modules/react-dom"),
     },
+  },
+  optimizeDeps: {
+    include: ["@tanstack/react-virtual"],
   },
 });

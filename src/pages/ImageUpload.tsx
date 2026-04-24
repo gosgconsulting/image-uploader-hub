@@ -3,26 +3,15 @@ import { useOutletContext } from "react-router-dom";
 import { Plus, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ImportTable } from "@/components/ImportTable";
+import {
+  ImportTable,
+  parsePreviewImagesJson,
+  type ImportListRow,
+} from "@/components/ImportTable";
 import { NewImportDialog } from "@/components/NewImportDialog";
 import { WebhookSettings } from "@/components/WebhookSettings";
 import { supabase } from "@/integrations/supabase/client";
 import type { DashboardOutletContext } from "@/types/dashboardOutletContext";
-
-interface ImportImage {
-  id: string;
-  file_name: string;
-  file_url: string;
-}
-
-interface Import {
-  id: string;
-  batch_name: string | null;
-  status: string;
-  webhook_url: string | null;
-  created_at: string;
-  import_images: ImportImage[];
-}
 
 function getInitialWebhookUrl(): string {
   const stored = localStorage.getItem("webhook_url");
@@ -32,9 +21,18 @@ function getInitialWebhookUrl(): string {
   return "";
 }
 
+function coerceImageCount(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = parseInt(value, 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
 export default function ImageUpload() {
   const { importBrandId } = useOutletContext<DashboardOutletContext>();
-  const [imports, setImports] = useState<Import[]>([]);
+  const [imports, setImports] = useState<ImportListRow[]>([]);
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState(() => getInitialWebhookUrl());
 
@@ -43,13 +41,34 @@ export default function ImageUpload() {
       setImports([]);
       return;
     }
-    const { data } = await supabase
-      .from("imports")
-      .select("*, import_images(id, file_name, file_url)")
+    const { data, error } = await supabase
+      .from("imports_with_list_preview")
+      .select("*")
       .eq("brand_id", importBrandId)
       .order("created_at", { ascending: false });
 
-    if (data) setImports(data as Import[]);
+    if (error) {
+      console.error("fetchImports", error);
+      setImports([]);
+      return;
+    }
+
+    if (!data) {
+      setImports([]);
+      return;
+    }
+
+    setImports(
+      data.map((row) => ({
+        id: row.id,
+        batch_name: row.batch_name,
+        status: row.status,
+        webhook_url: row.webhook_url,
+        created_at: row.created_at,
+        image_count: coerceImageCount(row.image_count),
+        preview_images: parsePreviewImagesJson(row.preview_images),
+      })),
+    );
   }, [importBrandId]);
 
   useEffect(() => {

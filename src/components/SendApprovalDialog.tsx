@@ -20,6 +20,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import {
+  VirtualImageGrid,
+  useGalleryPickerGridColumns,
+} from "@/components/VirtualImageGrid";
 
 interface ImportImage {
   id: string;
@@ -27,13 +31,13 @@ interface ImportImage {
   file_url: string;
 }
 
-interface Import {
+/** List row / session: no full `import_images` — loaded inside this dialog when opened. */
+export interface SendApprovalImport {
   id: string;
   batch_name: string | null;
   status: string;
   webhook_url: string | null;
   created_at: string;
-  import_images: ImportImage[];
 }
 
 export interface WebhookProduct {
@@ -65,8 +69,8 @@ interface MappedProduct {
 interface SendApprovalDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  imp: Import | null;
-  onApprove: (imp: Import, products: WebhookProduct[]) => void;
+  imp: SendApprovalImport | null;
+  onApprove: (imp: SendApprovalImport, products: WebhookProduct[]) => void;
   isSending: boolean;
   onDataChange?: () => void;
 }
@@ -214,10 +218,12 @@ function ImagePickerDialog({
   images,
   selectedIndex,
   title,
-  importId,
+  importId: _importId,
   onSelect,
-  onNewImagesUploaded,
+  onNewImagesUploaded: _onNewImagesUploaded,
 }: ImagePickerDialogProps) {
+  const cols = useGalleryPickerGridColumns();
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
@@ -225,53 +231,60 @@ function ImagePickerDialog({
           <DialogTitle className="font-mono text-sm">{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="overflow-auto flex-1 space-y-3">
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 p-1">
-            {images.map((img, i) => (
-              <button
-                key={i}
-                onClick={() => {
-                  onSelect(i);
-                  onOpenChange(false);
-                }}
-                className={`relative rounded-lg border-2 overflow-hidden aspect-square focus:outline-none transition-all ${
-                  i === selectedIndex
-                    ? "border-primary ring-2 ring-primary/30"
-                    : "border-muted hover:border-primary/50"
-                }`}
-              >
-                <img
-                  src={img.file_url}
-                  alt={img.file_name}
-                  className="h-full w-full object-cover"
-                />
-                {i === selectedIndex && (
-                  <div className="absolute top-1.5 right-1.5 bg-primary rounded-full h-5 w-5 flex items-center justify-center">
-                    <svg
-                      className="h-3 w-3 text-primary-foreground"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={3}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
+        <div className="flex flex-col flex-1 min-h-0 space-y-3">
+          {images.length > 0 ? (
+            <VirtualImageGrid
+              items={images}
+              columns={cols}
+              estimateRowHeight={220}
+              scrollClassName="overflow-y-auto flex-1 min-h-0 max-h-[50vh] p-1"
+              gridClassName="gap-3"
+              renderCell={(img, i) => (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelect(i);
+                    onOpenChange(false);
+                  }}
+                  className={`relative w-full rounded-lg border-2 overflow-hidden aspect-square focus:outline-none transition-all ${
+                    i === selectedIndex
+                      ? "border-primary ring-2 ring-primary/30"
+                      : "border-muted hover:border-primary/50"
+                  }`}
+                >
+                  <img
+                    src={img.file_url}
+                    alt={img.file_name}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  {i === selectedIndex && (
+                    <div className="absolute top-1.5 right-1.5 bg-primary rounded-full h-5 w-5 flex items-center justify-center">
+                      <svg
+                        className="h-3 w-3 text-primary-foreground"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={3}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    </div>
+                  )}
+                  <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5">
+                    <p className="text-[9px] text-white truncate">
+                      {img.file_name}
+                    </p>
                   </div>
-                )}
-                <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5">
-                  <p className="text-[9px] text-white truncate">
-                    {img.file_name}
-                  </p>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {/* Upload zone */}
+                </button>
+              )}
+            />
+          ) : null}
         </div>
 
         <DialogFooter>
@@ -304,11 +317,13 @@ function GalleryEditorDialog({
   onOpenChange,
   allImages,
   featureIndex,
-  importId,
-  onSetFeature,
+  importId: _importId,
+  onSetFeature: _onSetFeature,
   onRemoveGallery,
-  onNewImagesUploaded,
+  onNewImagesUploaded: _onNewImagesUploaded,
 }: GalleryEditorDialogProps) {
+  const cols = useGalleryPickerGridColumns();
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
@@ -317,65 +332,65 @@ function GalleryEditorDialog({
             Edit Gallery Images
           </DialogTitle>
         </DialogHeader>
-        <div className="overflow-auto flex-1 space-y-3">
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 p-1">
-            {allImages.map((img, i) => {
-              const isFeature = i === featureIndex;
-              return (
-                <div
-                  key={i}
-                  className={`relative rounded-lg border-2 overflow-hidden aspect-square group ${
-                    isFeature ? "border-primary" : "border-muted"
-                  }`}
-                >
-                  <img
-                    src={img.file_url}
-                    alt={img.file_name}
-                    className="h-full w-full object-cover"
-                  />
-
-                  {isFeature && (
-                    <div className="absolute top-1 left-1 bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded">
-                      Feature
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => onRemoveGallery(i)}
-                    className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full h-5 w-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Remove image"
+        <div className="flex flex-col flex-1 min-h-0 space-y-3">
+          {allImages.length > 0 ? (
+            <VirtualImageGrid
+              items={allImages}
+              columns={cols}
+              estimateRowHeight={260}
+              scrollClassName="overflow-y-auto flex-1 min-h-0 max-h-[50vh] p-1"
+              gridClassName="gap-3"
+              renderCell={(img, i) => {
+                const isFeature = i === featureIndex;
+                return (
+                  <div
+                    className={`relative rounded-lg border-2 overflow-hidden aspect-square group w-full ${
+                      isFeature ? "border-primary" : "border-muted"
+                    }`}
                   >
-                    <X className="h-3 w-3" />
-                  </button>
+                    <img
+                      src={img.file_url}
+                      alt={img.file_name}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                      decoding="async"
+                    />
 
-                  {/* {!isFeature && (
+                    {isFeature && (
+                      <div className="absolute top-1 left-1 bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded">
+                        Feature
+                      </div>
+                    )}
+
                     <button
-                      onClick={() => onSetFeature(i)}
-                      className="absolute bottom-0 inset-x-0 bg-primary/80 text-primary-foreground text-[9px] font-semibold py-1 opacity-0 group-hover:opacity-100 transition-opacity text-center"
+                      type="button"
+                      onClick={() => onRemoveGallery(i)}
+                      className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full h-5 w-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove image"
                     >
-                      Set as Feature
+                      <X className="h-3 w-3" />
                     </button>
-                  )} */}
 
-                  {isFeature && (
-                    <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5">
-                      <p className="text-[9px] text-white truncate">
-                        {img.file_name}
-                      </p>
-                    </div>
-                  )}
+                    {isFeature && (
+                      <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5">
+                        <p className="text-[9px] text-white truncate">
+                          {img.file_name}
+                        </p>
+                      </div>
+                    )}
 
-                  {!isFeature && (
-                    <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5 group-hover:opacity-0 transition-opacity">
-                      <p className="text-[9px] text-white truncate">
-                        {img.file_name}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    {!isFeature && (
+                      <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5 group-hover:opacity-0 transition-opacity">
+                        <p className="text-[9px] text-white truncate">
+                          {img.file_name}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              }}
+            />
+          ) : null}
         </div>
 
         <DialogFooter>
@@ -463,6 +478,8 @@ function FailedMappingsDialog({
                           src={row.file_url}
                           alt=""
                           className="h-full w-full object-cover"
+                          loading="lazy"
+                          decoding="async"
                         />
                       </a>
                     ) : (
@@ -520,14 +537,16 @@ export function SendApprovalDialog({
   const fetchMapData = useCallback(async () => {
     if (!imp) return;
     setLoading(true);
+    let images: ImportImage[] = [];
     try {
-      // Always pull the latest images from Supabase before calling the webhook
-      const { data: latestImages } = await supabase
+      const { data: latestImages, error: imgErr } = await supabase
         .from("import_images")
         .select("id, file_name, file_url")
-        .eq("import_id", imp.id);
+        .eq("import_id", imp.id)
+        .order("created_at", { ascending: true });
 
-      const images = (latestImages ?? imp.import_images) as ImportImage[];
+      if (imgErr) throw imgErr;
+      images = (latestImages ?? []) as ImportImage[];
 
       const response = await fetch(MAP_DATA_WEBHOOK_URL, {
         method: "POST",
@@ -554,7 +573,7 @@ export function SendApprovalDialog({
       onDataChange?.();
 
       const freshProducts =
-        grouped.length > 0 ? grouped : buildFallbackProducts(imp);
+        grouped.length > 0 ? grouped : buildFallbackProducts(imp.batch_name, images);
 
       setEditableProducts((prev) => {
         // First load — use webhook response as-is
@@ -598,13 +617,13 @@ export function SendApprovalDialog({
       });
       setRawProducts([]);
       setFailedMappings([]);
-      const fallback = buildFallbackProducts(imp);
+      const fallback = buildFallbackProducts(imp.batch_name, images);
       setEditableProducts(fallback);
       setSelectedRows(new Set(fallback.map((_, i) => i)));
     } finally {
       setLoading(false);
     }
-  }, [imp]);
+  }, [imp, onDataChange, toast]);
 
   // Reset only when the import itself changes, not on every close
   useEffect(() => {
@@ -617,8 +636,8 @@ export function SendApprovalDialog({
 
   // Fetch whenever the modal opens
   useEffect(() => {
-    if (open && imp) fetchMapData();
-  }, [open, imp?.id]);
+    if (open && imp) void fetchMapData();
+  }, [open, imp?.id, fetchMapData]);
 
   useEffect(() => {
     if (!open) setFailedMappingsOpen(false);
@@ -837,6 +856,8 @@ export function SendApprovalDialog({
                                   src={featureImage.file_url}
                                   alt={featureImage.file_name}
                                   className="h-full w-full object-cover"
+                                  loading="lazy"
+                                  decoding="async"
                                 />
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                   <Pencil className="h-4 w-4 text-white" />
@@ -868,6 +889,8 @@ export function SendApprovalDialog({
                                           src={img.file_url}
                                           alt={img.file_name}
                                           className="h-full w-full object-cover"
+                                          loading="lazy"
+                                          decoding="async"
                                         />
                                       </div>
                                     ))}
@@ -1261,13 +1284,16 @@ function parseWebhookResponse(data: unknown): {
   }
 }
 
-function buildFallbackProducts(imp: Import): MappedProduct[] {
+function buildFallbackProducts(
+  batchName: string | null,
+  images: ImportImage[],
+): MappedProduct[] {
   return [
     {
-      shopify_product_name: imp.batch_name || "Untitled Product",
+      shopify_product_name: batchName || "Untitled Product",
       referenceParent: "",
       productid: "",
-      images: imp.import_images.map((img) => ({
+      images: images.map((img) => ({
         file_name: img.file_name,
         file_url: img.file_url,
       })),
