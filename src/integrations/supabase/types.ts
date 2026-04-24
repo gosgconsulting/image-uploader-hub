@@ -358,6 +358,9 @@ export type Database = {
           member_user_id: string
           member_email: string
           created_at: string
+          account_created_at: string
+          last_sign_in_at: string | null
+          inviter_email: string | null
         }[]
       }
     }

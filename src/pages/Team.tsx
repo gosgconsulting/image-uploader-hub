@@ -5,7 +5,8 @@ import type { DashboardOutletContext } from "@/types/dashboardOutletContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { TeamInviteMemberDialog } from "@/components/TeamInviteMemberDialog";
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -14,13 +15,37 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TeamInviteMemberDialog } from "@/components/TeamInviteMemberDialog";
 
 type MemberRow = {
   id: string;
   member_user_id: string;
   member_email: string;
   created_at: string;
+  account_created_at: string;
+  last_sign_in_at: string | null;
+  inviter_email: string | null;
 };
+
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function fmtDateTime(iso: string | null | undefined) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function Team() {
   const { importBrandId, selectedBrandIsOwner, refreshBrands } =
@@ -60,7 +85,7 @@ export default function Team() {
 
   if (!importBrandId) {
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10 font-mono text-sm text-muted-foreground">
+      <div className="mx-auto max-w-3xl px-6 py-10 font-mono text-sm text-muted-foreground">
         Select a brand in the sidebar to manage team members.
       </div>
     );
@@ -87,7 +112,7 @@ export default function Team() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
+    <div className="mx-auto max-w-3xl px-6 py-10">
       <TeamInviteMemberDialog
         open={inviteOpen}
         onOpenChange={setInviteOpen}
@@ -110,60 +135,102 @@ export default function Team() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <h2 className="font-mono text-xs text-muted-foreground uppercase tracking-wide">
-          Members
-        </h2>
-        <Button type="button" size="sm" variant="secondary" onClick={() => setInviteOpen(true)}>
-          Add member
-        </Button>
-      </div>
-      {loading ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading…
+      <Card className="w-full p-6">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="font-mono text-xs uppercase tracking-wider">Members</Label>
+            <Button type="button" size="sm" variant="outline" onClick={() => setInviteOpen(true)}>
+              Add member
+            </Button>
+          </div>
+
+          {loading ? (
+            <p className="flex items-center gap-2 text-[10px] text-muted-foreground leading-snug">
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              Loading team…
+            </p>
+          ) : members.length === 0 ? (
+            <div
+              className="rounded-md border border-border/80 bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground leading-snug"
+              role="status"
+            >
+              <span className="font-medium text-foreground">No operators yet</span>
+              {" — "}
+              use Add member to invite someone who can run uploads and refunds for this brand.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-border/80">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-border/80 bg-muted/30 hover:bg-muted/30">
+                    <TableHead className="whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Email
+                    </TableHead>
+                    <TableHead className="whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Role
+                    </TableHead>
+                    <TableHead className="whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Added to brand
+                    </TableHead>
+                    <TableHead className="whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Account created
+                    </TableHead>
+                    <TableHead className="whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Last sign-in
+                    </TableHead>
+                    <TableHead className="whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Invited by
+                    </TableHead>
+                    <TableHead className="w-10 p-2 text-right">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {members.map((m) => (
+                    <TableRow key={m.id} className="border-b border-border/60 last:border-0">
+                      <TableCell className="max-w-[200px] truncate font-mono text-[11px] text-foreground">
+                        {m.member_email}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
+                        Operator
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                        {fmtDate(m.created_at)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                        {fmtDate(m.account_created_at)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                        {fmtDateTime(m.last_sign_in_at)}
+                      </TableCell>
+                      <TableCell className="max-w-[160px] truncate font-mono text-[11px] text-muted-foreground">
+                        {m.inviter_email ?? "—"}
+                      </TableCell>
+                      <TableCell className="p-2 text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          disabled={removingId === m.id}
+                          onClick={() => void handleRemove(m)}
+                          aria-label={`Remove ${m.member_email}`}
+                        >
+                          {removingId === m.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </div>
-      ) : members.length === 0 ? (
-        <p className="text-sm text-muted-foreground font-mono">No operators yet.</p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="font-mono text-xs">Email</TableHead>
-              <TableHead className="font-mono text-xs w-[140px]">Since</TableHead>
-              <TableHead className="font-mono text-xs w-[52px] text-right"> </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {members.map((m) => (
-              <TableRow key={m.id}>
-                <TableCell className="font-mono text-xs max-w-[200px] truncate">
-                  {m.member_email}
-                </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
-                  {new Date(m.created_at).toLocaleDateString()}
-                </TableCell>
-                <TableCell className="text-right p-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive"
-                    disabled={removingId === m.id}
-                    onClick={() => void handleRemove(m)}
-                    aria-label={`Remove ${m.member_email}`}
-                  >
-                    {removingId === m.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+      </Card>
     </div>
   );
 }
