@@ -85,7 +85,7 @@ export default function Team() {
 
   if (!importBrandId) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-10 font-mono text-sm text-muted-foreground">
+      <div className="mx-auto max-w-7xl px-6 py-10 font-mono text-sm text-muted-foreground">
         Select a brand in the sidebar to manage team members.
       </div>
     );
@@ -112,7 +112,7 @@ export default function Team() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    <div className="mx-auto max-w-7xl px-6 py-10">
       <TeamInviteMemberDialog
         open={inviteOpen}
         onOpenChange={setInviteOpen}
