@@ -33,25 +33,52 @@ export async function resolveRefundAccessToken(
   } = await admin.auth.getUser(bearer);
 
   if (!userErr && user) {
-    const { data: cred, error: credErr } = await admin
+    const { data: ownCred, error: ownErr } = await admin
       .from("shopify_credentials")
       .select("id, access_token")
       .eq("user_id", user.id)
       .eq("shop_domain", normalizedShop)
       .maybeSingle();
 
-    if (credErr || !cred?.access_token || !cred.id) {
+    if (!ownErr && ownCred?.access_token && ownCred.id) {
       return {
-        ok: false,
-        status: 400,
-        error: "No Shopify credentials for this shop. Save them in the app while signed in.",
+        ok: true,
+        accessToken: ownCred.access_token as string,
+        credentialId: ownCred.id as string,
       };
     }
 
+    const { data: memberRows, error: memErr } = await admin
+      .from("brand_members")
+      .select("brand_id")
+      .eq("member_user_id", user.id);
+
+    const brandIds = (memberRows ?? [])
+      .map((r) => (r as { brand_id?: string }).brand_id)
+      .filter((id): id is string => Boolean(id?.trim()));
+
+    if (!memErr && brandIds.length > 0) {
+      const { data: sharedCred, error: sharedErr } = await admin
+        .from("shopify_credentials")
+        .select("id, access_token")
+        .eq("shop_domain", normalizedShop)
+        .in("brand_id", brandIds)
+        .limit(1)
+        .maybeSingle();
+
+      if (!sharedErr && sharedCred?.access_token && sharedCred.id) {
+        return {
+          ok: true,
+          accessToken: sharedCred.access_token as string,
+          credentialId: sharedCred.id as string,
+        };
+      }
+    }
+
     return {
-      ok: true,
-      accessToken: cred.access_token as string,
-      credentialId: cred.id as string,
+      ok: false,
+      status: 400,
+      error: "No Shopify credentials for this shop. Save them in the app while signed in.",
     };
   }
 

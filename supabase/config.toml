@@ -12,3 +12,7 @@ verify_jwt = false
 # Shopify redirects here without a Supabase JWT; we validate HMAC + state server-side.
 [functions.shopify-oauth]
 verify_jwt = false
+
+# Caller JWT verified in-function; service role used for Auth Admin + member rows.
+[functions.brand-team-invite]
+verify_jwt = false

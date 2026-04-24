@@ -5,6 +5,7 @@ import { insertBrand, listBrandsForUser, type BrandRow } from "@/lib/brands-db";
 const LS_SELECTED_BRAND = "dashboard_selected_brand_id";
 
 export function useDashboardBrands() {
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [brands, setBrands] = useState<BrandRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     try {
@@ -20,11 +21,13 @@ export function useDashboardBrands() {
       data: { session },
     } = await supabase.auth.getSession();
     if (!session) {
+      setAuthUserId(null);
       setBrands([]);
       setSelectedId(null);
       setLoading(false);
       return;
     }
+    setAuthUserId(session.user.id);
     const rows = await listBrandsForUser();
     setBrands(rows);
     let stored: string | null = null;
@@ -88,6 +91,10 @@ export function useDashboardBrands() {
 
   const selectedBrand = brands.find((b) => b.id === selectedId) ?? null;
 
+  const selectedBrandIsOwner = Boolean(
+    selectedBrand && authUserId && selectedBrand.ownerUserId === authUserId
+  );
+
   return {
     brands,
     selectedBrand,
@@ -96,5 +103,6 @@ export function useDashboardBrands() {
     createBrand,
     loading,
     refreshBrands: load,
+    selectedBrandIsOwner,
   };
 }

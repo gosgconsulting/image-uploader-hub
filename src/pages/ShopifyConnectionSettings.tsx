@@ -1,8 +1,15 @@
+import { Navigate, useOutletContext } from "react-router-dom";
 import { Store } from "lucide-react";
 import { ShopifySettings } from "@/components/ShopifySettings";
 import { useShopifyConnection } from "@/components/ShopifyConnectionProvider";
+import type { DashboardOutletContext } from "@/types/dashboardOutletContext";
 
 export default function ShopifyConnectionSettings() {
+  const { selectedBrandIsOwner } = useOutletContext<DashboardOutletContext>();
+  if (!selectedBrandIsOwner) {
+    return <Navigate to="/image-upload" replace />;
+  }
+
   const {
     shopifyShop,
     setShopifyShop,

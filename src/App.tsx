@@ -7,6 +7,7 @@ import { DashboardLayout } from "./components/DashboardLayout";
 import ImageUpload from "./pages/ImageUpload";
 import Refund from "./pages/Refund";
 import ShopifyConnectionSettings from "./pages/ShopifyConnectionSettings";
+import Team from "./pages/Team";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -25,6 +26,7 @@ const App = () => (
             <Route path="/image-upload" element={<ImageUpload />} />
             <Route path="/refund" element={<Refund />} />
             <Route path="/shopify-settings" element={<ShopifyConnectionSettings />} />
+            <Route path="/team" element={<Team />} />
           </Route>
 
           <Route path="/auth" element={<Auth />} />

@@ -73,6 +73,38 @@ export type Database = {
           },
         ]
       }
+      brand_members: {
+        Row: {
+          id: string
+          brand_id: string
+          member_user_id: string
+          invited_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          brand_id: string
+          member_user_id: string
+          invited_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          brand_id?: string
+          member_user_id?: string
+          invited_by?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_members_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       import_images: {
         Row: {
           created_at: string
@@ -318,6 +350,15 @@ export type Database = {
       delete_brand_shopify_partner_app: {
         Args: { p_brand_id: string }
         Returns: Json
+      }
+      list_brand_team_members_for_owner: {
+        Args: { p_brand_id: string }
+        Returns: {
+          id: string
+          member_user_id: string
+          member_email: string
+          created_at: string
+        }[]
       }
     }
     Enums: {

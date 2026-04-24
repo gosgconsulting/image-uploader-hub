@@ -3,12 +3,16 @@ import { supabase } from "@/integrations/supabase/client";
 
 export const brandNameSchema = z.string().trim().min(1).max(120);
 
-export type BrandRow = { id: string; name: string };
+export type BrandRow = { id: string; name: string; ownerUserId: string };
 
 export async function listBrandsForUser(): Promise<BrandRow[]> {
-  const { data, error } = await supabase.from("brands").select("id, name").order("name");
+  const { data, error } = await supabase.from("brands").select("id, name, user_id").order("name");
   if (error || !data) return [];
-  return data.map((r) => ({ id: r.id, name: r.name }));
+  return data.map((r) => ({
+    id: r.id,
+    name: r.name,
+    ownerUserId: r.user_id as string,
+  }));
 }
 
 export async function insertBrand(

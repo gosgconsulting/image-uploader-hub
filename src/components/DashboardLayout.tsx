@@ -11,6 +11,7 @@ import {
   Building2,
   Plus,
   Loader2,
+  Users,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -36,10 +37,14 @@ import { cn } from "@/lib/utils";
 import { ShopifyConnectionProvider } from "@/components/ShopifyConnectionProvider";
 import { useDashboardBrands } from "@/hooks/useDashboardBrands";
 
-const navItems = [
+const coreNavItems = [
   { label: "Image Upload", to: "/image-upload", icon: Package },
   { label: "Refund", to: "/refund", icon: DollarSign },
+];
+
+const ownerNavItems = [
   { label: "Shopify", to: "/shopify-settings", icon: Store },
+  { label: "Team", to: "/team", icon: Users },
 ];
 
 export function DashboardLayout() {
@@ -50,8 +55,22 @@ export function DashboardLayout() {
   const [addBrandOpen, setAddBrandOpen] = useState(false);
   const [newBrandName, setNewBrandName] = useState("");
   const [creatingBrand, setCreatingBrand] = useState(false);
-  const { brands, selectedBrand, selectBrand, createBrand, loading: brandsLoading } =
-    useDashboardBrands();
+  const {
+    brands,
+    selectedBrand,
+    selectBrand,
+    createBrand,
+    loading: brandsLoading,
+    selectedBrandIsOwner,
+    refreshBrands,
+  } = useDashboardBrands();
+
+  const showBrandAdminControls =
+    brands.length === 0 || selectedBrand === null || selectedBrandIsOwner;
+  const navItems = [
+    ...coreNavItems,
+    ...(selectedBrandIsOwner ? ownerNavItems : []),
+  ];
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -138,26 +157,32 @@ export function DashboardLayout() {
                   {brand.name}
                 </DropdownMenuItem>
               ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="font-mono text-xs gap-2 cursor-pointer"
-                onClick={() => setAddBrandOpen(true)}
-              >
-                <Plus className="h-3.5 w-3.5 shrink-0" />
-                Add brand…
-              </DropdownMenuItem>
+              {showBrandAdminControls ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="font-mono text-xs gap-2 cursor-pointer"
+                    onClick={() => setAddBrandOpen(true)}
+                  >
+                    <Plus className="h-3.5 w-3.5 shrink-0" />
+                    Add brand…
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start gap-2 font-mono text-xs text-muted-foreground rounded-xl h-8 px-2"
-            onClick={() => setAddBrandOpen(true)}
-          >
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-            New brand
-          </Button>
+          {showBrandAdminControls ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start gap-2 font-mono text-xs text-muted-foreground rounded-xl h-8 px-2"
+              onClick={() => setAddBrandOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              New brand
+            </Button>
+          ) : null}
         </div>
 
         <nav className="flex-1 px-2 space-y-1">
@@ -197,7 +222,11 @@ export function DashboardLayout() {
         <ShopifyConnectionProvider brandId={selectedBrand?.id ?? null}>
           <Outlet
             context={
-              { importBrandId: selectedBrand?.id ?? null } satisfies DashboardOutletContext
+              {
+                importBrandId: selectedBrand?.id ?? null,
+                selectedBrandIsOwner,
+                refreshBrands,
+              } satisfies DashboardOutletContext
             }
           />
         </ShopifyConnectionProvider>
