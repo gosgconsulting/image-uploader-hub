@@ -55,14 +55,20 @@ function shopifyAdminProxy(): Plugin {
 
         // Prefer IPv4 for Shopify Admin. Do not use a custom `lookup`: Node 18+ may pass
         // `all: true` (happy eyeballs); a naive dns.lookup callback shape yields "Invalid IP address: undefined".
+        const forwardHeaders: Record<string, string> = {
+          "X-Shopify-Access-Token": token,
+          Accept: "application/json",
+        };
+        const contentType = req.headers["content-type"];
+        if (typeof contentType === "string" && contentType.length > 0) {
+          forwardHeaders["Content-Type"] = contentType;
+        }
+
         const opts = {
           hostname: shopHost,
           path: shopPath,
           method: req.method || "GET",
-          headers: {
-            "X-Shopify-Access-Token": token,
-            Accept: "application/json",
-          },
+          headers: forwardHeaders,
           family: 4 as const,
           autoSelectFamily: false,
         } as https.RequestOptions;

@@ -120,6 +120,7 @@ export default function ImageUpload() {
         imports={imports}
         webhookUrl={webhookUrl}
         onStatusChange={fetchImports}
+        brandId={importBrandId}
       />
 
       <NewImportDialog

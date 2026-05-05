@@ -19,7 +19,9 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveShopifyAdminForMapping } from "@/lib/shopify-credentials";
 import { cn } from "@/lib/utils";
+import { mapImportImagesToShopifyProducts } from "@/utils/mapImportImagesToShopifyProducts";
 import {
   VirtualImageGrid,
   useGalleryPickerGridColumns,
@@ -50,7 +52,7 @@ export interface WebhookProduct {
   referenceParent?: string;
 }
 
-/** Image rows returned under `failed` from the map-data webhook (no Shopify product). */
+/** Image rows with no resolved Shopify product after reference-parent lookup. */
 export interface FailedMapping {
   id: string;
   file_name: string;
@@ -73,6 +75,8 @@ interface SendApprovalDialogProps {
   onApprove: (imp: SendApprovalImport, products: WebhookProduct[]) => void;
   isSending: boolean;
   onDataChange?: () => void;
+  /** Used to load Shopify Admin credentials from Supabase when enabled. */
+  brandId?: string | null;
 }
 
 // ─── Upload helper ─────────────────────────────────────────────────────────────
@@ -513,9 +517,6 @@ function FailedMappingsDialog({
 
 // ─── Main dialog ───────────────────────────────────────────────────────────────
 
-const MAP_DATA_WEBHOOK_URL =
-  "https://n8n-main-instance-production-8d68.up.railway.app/webhook/mapdata";
-
 export function SendApprovalDialog({
   open,
   onOpenChange,
@@ -523,6 +524,7 @@ export function SendApprovalDialog({
   onApprove,
   isSending,
   onDataChange,
+  brandId = null,
 }: SendApprovalDialogProps) {
   const [loading, setLoading] = useState(false);
   const [rawProducts, setRawProducts] = useState<WebhookProduct[]>([]);
@@ -548,28 +550,33 @@ export function SendApprovalDialog({
       if (imgErr) throw imgErr;
       images = (latestImages ?? []) as ImportImage[];
 
-      const response = await fetch(MAP_DATA_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          import_id: imp.id,
-          batch_name: imp.batch_name,
-          status: imp.status,
-          webhook_url: imp.webhook_url,
-          created_at: imp.created_at,
-          images: images.map((img) => ({
-            id: img.id,
-            file_name: img.file_name,
-            file_url: img.file_url,
-          })),
-        }),
-      });
+      const creds = await resolveShopifyAdminForMapping(brandId);
+      if (!creds) {
+        toast({
+          title: "Shopify not connected",
+          description:
+            "Add your shop and Admin API token under Shopify settings (or save credentials for this brand), then try again.",
+          variant: "destructive",
+        });
+        setRawProducts([]);
+        setFailedMappings([]);
+        const fallback = buildFallbackProducts(imp.batch_name, images);
+        setEditableProducts(fallback);
+        setSelectedRows(new Set(fallback.map((_, i) => i)));
+        return;
+      }
 
-      const data = await response.json();
-      const { filtered, grouped, failed } = parseWebhookResponse(data);
+      const { filtered, grouped, failed } = await mapImportImagesToShopifyProducts(
+        creds.shop,
+        creds.token,
+        images,
+      );
 
-      setRawProducts(filtered);
-      setFailedMappings(mergeFailedAndOrphans(filtered, failed, images));
+      const matchedRows = filtered as WebhookProduct[];
+      const failedRows = failed as FailedMapping[];
+
+      setRawProducts(matchedRows);
+      setFailedMappings(mergeFailedAndOrphans(matchedRows, failedRows, images));
       onDataChange?.();
 
       const freshProducts =
@@ -623,7 +630,7 @@ export function SendApprovalDialog({
     } finally {
       setLoading(false);
     }
-  }, [imp, onDataChange, toast]);
+  }, [imp, onDataChange, toast, brandId]);
 
   // Reset only when the import itself changes, not on every close
   useEffect(() => {
@@ -748,8 +755,6 @@ export function SendApprovalDialog({
             }) as WebhookProduct,
         ),
       );
-
-    console.log("payload", payload);
 
     onApprove(imp, payload);
   };
@@ -1029,190 +1034,7 @@ export function SendApprovalDialog({
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-const FAILED_KEYS = [
-  "failed",
-  "Failed",
-  "failures",
-  "errors",
-  "unmatched",
-  "notMatched",
-  "failed_mappings",
-] as const;
-
-function unwrapWebhookRoot(raw: unknown, depth = 0): unknown {
-  if (depth > 6 || raw == null) return raw;
-  if (Array.isArray(raw)) {
-    if (raw.length === 1 && typeof raw[0] === "object" && raw[0] !== null) {
-      const only = raw[0] as Record<string, unknown>;
-      if (
-        !Array.isArray(only.products) &&
-        !Array.isArray(only.successful) &&
-        !Array.isArray(only.failed) &&
-        typeof only.json === "object"
-      ) {
-        return unwrapWebhookRoot(only.json, depth + 1);
-      }
-    }
-    return raw;
-  }
-  if (typeof raw !== "object") return raw;
-  const o = raw as Record<string, unknown>;
-  const inner =
-    o.json ??
-    o.data ??
-    o.body ??
-    o.output ??
-    o.result ??
-    o.response;
-  if (inner !== undefined && typeof inner === "object") {
-    return unwrapWebhookRoot(inner, depth + 1);
-  }
-  return raw;
-}
-
-function collectArrays(
-  obj: Record<string, unknown> | undefined,
-  keys: readonly string[],
-): Record<string, unknown>[] {
-  if (!obj) return [];
-  const out: Record<string, unknown>[] = [];
-  const o = obj as Record<string, unknown>;
-  for (const k of keys) {
-    const v = o[k];
-    if (Array.isArray(v)) out.push(...(v as Record<string, unknown>[]));
-  }
-  return out;
-}
-
-function isFailedRow(row: Record<string, unknown>): boolean {
-  const st = String(row.status ?? row.state ?? "").toLowerCase();
-  if (st === "failed" || st === "error" || st === "failure") return true;
-  const pid = row.productid;
-  const hasPid = pid != null && String(pid).trim() !== "";
-  if (!hasPid && row.file_url) return true;
-  return false;
-}
-
-function partitionProductsByStatus(
-  rows: Record<string, unknown>[],
-): { ok: Record<string, unknown>[]; bad: Record<string, unknown>[] } {
-  const ok: Record<string, unknown>[] = [];
-  const bad: Record<string, unknown>[] = [];
-  for (const row of rows) {
-    if (isFailedRow(row)) bad.push(row);
-    else ok.push(row);
-  }
-  return { ok, bad };
-}
-
-function extractWebhookPayloads(raw: unknown): {
-  successRows: Record<string, unknown>[];
-  failedRows: Record<string, unknown>[];
-} {
-  const successRows: Record<string, unknown>[] = [];
-  const failedRows: Record<string, unknown>[] = [];
-
-  const root = unwrapWebhookRoot(raw);
-  const candidates: Record<string, unknown>[] = [];
-
-  if (Array.isArray(root)) {
-    for (const item of root) {
-      if (item && typeof item === "object") {
-        candidates.push(item as Record<string, unknown>);
-      }
-    }
-  } else if (root && typeof root === "object") {
-    candidates.push(root as Record<string, unknown>);
-  }
-
-  for (const obj of candidates) {
-    successRows.push(
-      ...collectArrays(obj, ["successful", "Successful", "success", "matched"]),
-    );
-    for (const k of FAILED_KEYS) {
-      const v = obj[k];
-      if (Array.isArray(v)) failedRows.push(...(v as Record<string, unknown>[]));
-    }
-  }
-
-  const productBlobs: Record<string, unknown>[] = [];
-  for (const obj of candidates) {
-    if (Array.isArray(obj.products)) {
-      productBlobs.push(...(obj.products as Record<string, unknown>[]));
-    }
-  }
-
-  if (productBlobs.length > 0) {
-    const { ok, bad } = partitionProductsByStatus(productBlobs);
-    if (successRows.length === 0) successRows.push(...ok);
-    else {
-      for (const row of ok) {
-        if (!successRows.includes(row)) successRows.push(row);
-      }
-    }
-    failedRows.push(...bad);
-  }
-
-  if (successRows.length === 0 && productBlobs.length === 0) {
-    const r = root as Record<string, unknown> | unknown[];
-    let legacy: Record<string, unknown>[] = [];
-    if (!Array.isArray(r) && r && typeof r === "object" && Array.isArray(r.products)) {
-      legacy = r.products as Record<string, unknown>[];
-    } else if (
-      Array.isArray(r) &&
-      r[0] &&
-      typeof r[0] === "object" &&
-      Array.isArray((r[0] as Record<string, unknown>).products)
-    ) {
-      legacy = (r[0] as { products: Record<string, unknown>[] }).products;
-    }
-    const { ok, bad } = partitionProductsByStatus(legacy);
-    successRows.push(...ok);
-    failedRows.push(...bad);
-  }
-
-  return { successRows, failedRows };
-}
-
-function rowToWebhookProduct(row: Record<string, unknown>): WebhookProduct | null {
-  const productid = String(row.productid ?? "");
-  if (!productid) return null;
-  const file_name = String(
-    row.original_file_name ?? row.file_name ?? "",
-  );
-  const ref =
-    (row.referenceparent as string | undefined) ??
-    (row.referenceParent as string | undefined);
-  return {
-    id: String(row.id ?? ""),
-    file_name,
-    file_url: String(row.file_url ?? ""),
-    productid,
-    productname: String(row.productname ?? ""),
-    referenceparent: ref,
-    referenceParent: ref,
-  };
-}
-
-function rowToFailedMapping(row: Record<string, unknown>): FailedMapping {
-  const err =
-    row.error ??
-    row.message ??
-    row.reason ??
-    row.detail ??
-    "No matching product found on Shopify";
-  return {
-    id: String(row.id ?? ""),
-    file_name: String(row.original_file_name ?? row.file_name ?? ""),
-    file_url: String(row.file_url ?? ""),
-    referenceParent: String(
-      row.referenceparent ?? row.referenceParent ?? "",
-    ),
-    error: String(err),
-  };
-}
-
-/** Combine webhook `failed` rows with import images that never appear on a matched row. */
+/** Combine failed mappings with import images that never appear on a matched row. */
 function mergeFailedAndOrphans(
   filtered: WebhookProduct[],
   failed: FailedMapping[],
@@ -1236,52 +1058,10 @@ function mergeFailedAndOrphans(
       file_url: img.file_url,
       referenceParent: "",
       error:
-        "Not included in any matched Shopify product for this batch. Check filename, reference, or the mapping workflow output.",
+        "Not included in any matched Shopify product for this batch. Check the reference parent segment before the first \"-\" in the filename.",
     });
   }
   return [...byUrl.values()];
-}
-
-function parseWebhookResponse(data: unknown): {
-  filtered: WebhookProduct[];
-  grouped: MappedProduct[];
-  failed: FailedMapping[];
-} {
-  const empty = { filtered: [] as WebhookProduct[], grouped: [] as MappedProduct[], failed: [] as FailedMapping[] };
-  try {
-    const { successRows, failedRows } = extractWebhookPayloads(data);
-    const failed = failedRows.map(rowToFailedMapping);
-
-    const filtered = successRows
-      .map(rowToWebhookProduct)
-      .filter((p): p is WebhookProduct => p !== null);
-
-    if (filtered.length === 0) {
-      return { ...empty, failed };
-    }
-
-    const groupedMap = new Map<string, WebhookProduct[]>();
-    for (const item of filtered) {
-      const key = item.productid;
-      if (!groupedMap.has(key)) groupedMap.set(key, []);
-      groupedMap.get(key)!.push(item);
-    }
-
-    const grouped = Array.from(groupedMap.values()).map((group) => ({
-      shopify_product_name: group[0].productname,
-      referenceParent:
-        group[0].referenceparent ?? group[0].referenceParent ?? "",
-      productid: group[0].productid,
-      images: group.map((p) => ({
-        file_name: p.file_name,
-        file_url: p.file_url,
-      })),
-    }));
-
-    return { filtered, grouped, failed };
-  } catch {
-    return empty;
-  }
 }
 
 function buildFallbackProducts(

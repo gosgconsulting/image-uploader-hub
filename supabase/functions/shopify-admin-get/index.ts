@@ -7,6 +7,35 @@ import { verifyShopifySessionToken } from "../shopify-create-refund/verifyShopif
 
 const SHOPIFY_API_VERSION = "2026-04";
 
+const GET_PRODUCT_BY_REFERENCE_PARENT = `query getProductByReferenceParent($query: String!) {
+  products(first: 10, query: $query) {
+    edges {
+      node {
+        id
+        title
+        metafield(namespace: "custom", key: "referenceparent") {
+          value
+        }
+        variants(first: 10) {
+          edges {
+            node {
+              id
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+/** Mirrors client: prefix search on custom.referenceparent metafield. */
+function shopifyReferenceParentSearchToken(referenceParent: string): string {
+  const s = referenceParent.trim();
+  if (!s) return "";
+  const token = /[\s:"]/.test(s) ? JSON.stringify(s) : s;
+  return `metafields.custom.referenceparent:${token}*`;
+}
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -102,6 +131,7 @@ serve(async (req) => {
     kind?: string;
     orderNumericId?: string;
     adminAccessToken?: string;
+    referenceParent?: string;
   };
   try {
     body = await req.json();
@@ -121,7 +151,9 @@ serve(async (req) => {
     return json({ error: "Invalid or unsupported shop domain" }, 400);
   }
 
-  let path: string;
+  let path: string | null = null;
+  let graphqlPayload: string | null = null;
+
   if (kind === "shop") {
     path = `/admin/api/${SHOPIFY_API_VERSION}/shop.json`;
   } else if (kind === "order") {
@@ -129,8 +161,27 @@ serve(async (req) => {
       return json({ error: "orderNumericId must be digits only" }, 400);
     }
     path = `/admin/api/${SHOPIFY_API_VERSION}/orders/${orderNumericId}.json`;
+  } else if (kind === "product_by_reference_parent") {
+    const refRaw = typeof body.referenceParent === "string" ? body.referenceParent : "";
+    const searchQuery = shopifyReferenceParentSearchToken(refRaw);
+    if (!searchQuery) {
+      return json(
+        { error: "referenceParent is required for product_by_reference_parent" },
+        400,
+      );
+    }
+    graphqlPayload = JSON.stringify({
+      query: GET_PRODUCT_BY_REFERENCE_PARENT,
+      variables: { query: searchQuery },
+    });
   } else {
-    return json({ error: "kind must be shop or order" }, 400);
+    return json(
+      {
+        error:
+          "kind must be shop, order, or product_by_reference_parent",
+      },
+      400,
+    );
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -160,16 +211,31 @@ serve(async (req) => {
     accessToken = resolved.accessToken;
   }
 
-  const url = `https://${normalizedShop}${path}`;
   let shopRes: Response;
   try {
-    shopRes = await fetch(url, {
-      method: "GET",
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        Accept: "application/json",
-      },
-    });
+    if (graphqlPayload !== null) {
+      const gqlUrl = `https://${normalizedShop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+      shopRes = await fetch(gqlUrl, {
+        method: "POST",
+        headers: {
+          "X-Shopify-Access-Token": accessToken,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: graphqlPayload,
+      });
+    } else if (path !== null) {
+      const url = `https://${normalizedShop}${path}`;
+      shopRes = await fetch(url, {
+        method: "GET",
+        headers: {
+          "X-Shopify-Access-Token": accessToken,
+          Accept: "application/json",
+        },
+      });
+    } else {
+      return json({ error: "Invalid request shape" }, 500);
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
     return json({ error: `Could not reach Shopify (${msg})` }, 502);

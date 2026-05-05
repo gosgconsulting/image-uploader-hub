@@ -51,6 +51,7 @@ interface ImportTableProps {
   imports: ImportListRow[];
   webhookUrl: string;
   onStatusChange: () => void;
+  brandId?: string | null;
 }
 
 const statusVariant: Record<
@@ -203,6 +204,7 @@ export function ImportTable({
   imports,
   webhookUrl,
   onStatusChange,
+  brandId = null,
 }: ImportTableProps) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -405,6 +407,7 @@ export function ImportTable({
         }}
         isSending={sendingId === approvalImport?.id}
         onDataChange={onStatusChange}
+        brandId={brandId}
       />
 
       <AlertDialog

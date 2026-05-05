@@ -57,6 +57,28 @@ export async function fetchShopifyCredentialForBrand(
   };
 }
 
+/**
+ * Shopify domain + Admin token for client-side API calls (e.g. image import mapping).
+ * Prefers Supabase-stored credentials for the brand when enabled, otherwise localStorage.
+ */
+export async function resolveShopifyAdminForMapping(
+  brandId: string | null,
+): Promise<{ shop: string; token: string } | null> {
+  if (brandId?.trim() && shouldLoadShopifyCredentialsFromSupabase()) {
+    const row = await fetchShopifyCredentialForBrand(brandId);
+    if (row && hasShopifyAdminCredentials(row.shop_domain, row.access_token)) {
+      return { shop: row.shop_domain, token: row.access_token };
+    }
+  }
+
+  const fromLsShop = localStorage.getItem("shopify_shop")?.trim() ?? "";
+  const fromLsToken = localStorage.getItem("shopify_admin_token")?.trim() ?? "";
+  if (hasShopifyAdminCredentials(fromLsShop, fromLsToken)) {
+    return { shop: fromLsShop, token: fromLsToken };
+  }
+  return null;
+}
+
 export async function upsertShopifyCredential(
   shopDomain: string,
   accessToken: string,
