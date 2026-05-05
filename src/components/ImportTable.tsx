@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import {
   Send,
@@ -7,6 +7,8 @@ import {
   Image as ImageIcon,
   Trash2,
   ListChecks,
+  History,
+  ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,11 +34,17 @@ import { ImportStatusModal } from "@/components/ImportStatusModal";
 import {
   SendApprovalDialog,
   type SendApprovalImport,
+  type UploadMode,
   WebhookProduct,
 } from "@/components/SendApprovalDialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { deleteImportWithStorage } from "@/lib/delete-import";
+import { useImportUploadProgress } from "@/lib/import-upload-queue";
+import { takeImportSnapshot } from "@/lib/shopify-import-snapshots";
+import { reorderImportMedia } from "@/lib/shopify-product-reorder";
+import { ReorderPreviewDialog } from "@/components/ReorderPreviewDialog";
+import { RollbackDialog } from "@/components/RollbackDialog";
 
 export interface ImportImage {
   id: string;
@@ -86,6 +94,8 @@ type ImportTableRowProps = {
   onSend: (imp: ImportListRow) => void;
   onDelete: (imp: ImportListRow) => void;
   onShowStatus: (imp: ImportListRow) => void;
+  onRollback: (imp: ImportListRow) => void;
+  onReorder: (imp: ImportListRow) => void;
 };
 
 const ImportTableRow = memo(function ImportTableRow({
@@ -96,14 +106,26 @@ const ImportTableRow = memo(function ImportTableRow({
   onSend,
   onDelete,
   onShowStatus,
+  onRollback,
+  onReorder,
 }: ImportTableRowProps) {
   const isSending = sendingId === imp.id;
   const isDeleting = deletingId === imp.id;
+  // Live progress from the in-browser upload queue (the file→storage step). This is
+  // separate from `imp.status`, which tracks the Shopify-push step and is server-side.
+  const uploadProgress = useImportUploadProgress(imp.id);
+  const uploadInFlight =
+    uploadProgress !== null && uploadProgress.finishedAt === null;
   // Allow retrying queued/processing rows: a stuck `processing` (worker timed out) and a
   // `partial` (some images failed) should both be re-sendable. Only block during the
-  // synchronous handoff (when our own click is in flight).
-  const sendDisabled = isSending;
-  const deleteDisabled = deletingId !== null || isSending;
+  // synchronous handoff (when our own click is in flight) or while the local browser
+  // queue is still pushing files for this import to storage.
+  const sendDisabled = isSending || uploadInFlight;
+  const deleteDisabled = deletingId !== null || isSending || uploadInFlight;
+  // Reorder relies on shopify_product_id rows that are populated by the send step,
+  // so block until at least one image has succeeded on Shopify.
+  const reorderDisabled =
+    isSending || uploadInFlight || (imp.succeeded_count ?? 0) === 0;
   const isActive = imp.status === "queued" || imp.status === "processing";
   const showStatusButton =
     imp.status !== "pending" || (imp.succeeded_count ?? 0) + (imp.failed_count ?? 0) > 0;
@@ -168,6 +190,20 @@ const ImportTableRow = memo(function ImportTableRow({
                 {imp.succeeded_count}✓ {imp.failed_count ? `${imp.failed_count}✗` : ""}
               </span>
             )}
+          {uploadProgress && (
+            <span className="text-[10px] font-mono text-blue-600 inline-flex items-center gap-1">
+              {uploadProgress.finishedAt === null ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : null}
+              uploading {uploadProgress.done + uploadProgress.failed}
+              /{uploadProgress.total}
+              {uploadProgress.failed > 0 && (
+                <span className="text-destructive">
+                  &nbsp;({uploadProgress.failed} failed)
+                </span>
+              )}
+            </span>
+          )}
         </div>
       </TableCell>
       <TableCell className="text-right">
@@ -197,6 +233,15 @@ const ImportTableRow = memo(function ImportTableRow({
             variant="ghost"
             size="sm"
             type="button"
+            onClick={() => onRollback(imp)}
+            aria-label="View backups & rollback"
+          >
+            <History className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
             onClick={() => onSend(imp)}
             disabled={sendDisabled}
             aria-label={isActive ? "Resend (currently active)" : "Send to Shopify"}
@@ -206,6 +251,17 @@ const ImportTableRow = memo(function ImportTableRow({
             ) : (
               <Send className="h-3.5 w-3.5" />
             )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() => onReorder(imp)}
+            disabled={reorderDisabled}
+            aria-label="Reorder product images by filename"
+            title="Reorder product images by filename"
+          >
+            <ArrowUpDown className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="ghost"
@@ -254,6 +310,11 @@ export function ImportTable({
 }: ImportTableProps) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [reorderTarget, setReorderTarget] = useState<ImportListRow | null>(null);
+  // Imports the user just sent. We watch for them to land in a terminal state
+  // (completed/partial) and then auto-reorder so the gallery follows the
+  // filename convention without a second click.
+  const pendingAutoReorderRef = useRef<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<ImportListRow | null>(null);
   const [preview, setPreview] = useState<{
     batchName: string;
@@ -264,7 +325,48 @@ export function ImportTable({
     null,
   );
   const [statusTarget, setStatusTarget] = useState<ImportListRow | null>(null);
+  const [rollbackTarget, setRollbackTarget] = useState<ImportListRow | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    const trimmedBrand = brandId?.trim() ?? "";
+    if (!trimmedBrand) return;
+    const pending = pendingAutoReorderRef.current;
+    if (pending.size === 0) return;
+    const ready: string[] = [];
+    for (const imp of imports) {
+      if (!pending.has(imp.id)) continue;
+      if (
+        imp.status === "completed" ||
+        imp.status === "partial" ||
+        imp.status === "failed"
+      ) {
+        ready.push(imp.id);
+      }
+    }
+    if (ready.length === 0) return;
+    for (const id of ready) pending.delete(id);
+    void (async () => {
+      for (const id of ready) {
+        const res = await reorderImportMedia(trimmedBrand, id, { dryRun: false });
+        if (!res.ok) {
+          toast({
+            title: "Auto-reorder failed",
+            description: res.error,
+            variant: "destructive",
+          });
+          continue;
+        }
+        const moved = res.results.reduce((acc, r) => acc + r.moved, 0);
+        if (moved > 0) {
+          toast({
+            title: "Gallery auto-reordered",
+            description: `${moved} image${moved === 1 ? "" : "s"} moved across ${res.processed} product${res.processed === 1 ? "" : "s"}.`,
+          });
+        }
+      }
+    })();
+  }, [imports, brandId, toast]);
 
   const openPreview = useCallback((imp: ImportListRow) => {
     setPreview({
@@ -299,6 +401,8 @@ export function ImportTable({
   const handleTriggerWebhook = useCallback(async (
     imp: SendApprovalImport,
     products: WebhookProduct[],
+    mode: UploadMode,
+    backup: boolean,
   ) => {
     const webhookTarget = imp.webhook_url || webhookUrl;
     const trimmedBrand = brandId?.trim() ?? "";
@@ -314,6 +418,35 @@ export function ImportTable({
     }
 
     setSendingId(imp.id);
+
+    // Snapshot current Shopify product media BEFORE we touch anything. If the user
+    // unchecked the backup box, skip. If snapshot fails we abort so they don't lose
+    // state silently.
+    if (backup && trimmedBrand) {
+      const productIds = Array.from(
+        new Set(products.map((p) => p.productid).filter(Boolean)),
+      );
+      if (productIds.length > 0) {
+        const snap = await takeImportSnapshot({
+          brandId: trimmedBrand,
+          importId: imp.id,
+          productIds,
+        });
+        if (!snap.ok) {
+          toast({
+            title: "Backup failed — send aborted",
+            description: snap.error,
+            variant: "destructive",
+          });
+          setSendingId(null);
+          return;
+        }
+        toast({
+          title: "Backup saved",
+          description: `Snapshotted ${snap.snapshots} product${snap.snapshots === 1 ? "" : "s"}. You can rollback from the history icon.`,
+        });
+      }
+    }
     try {
       type ImportNativeResponse = {
         success?: boolean;
@@ -350,12 +483,16 @@ export function ImportTable({
                   brand_id: trimmedBrand,
                   import_id: imp.id,
                   products,
+                  upload_mode: mode,
                 },
               },
             );
 
           if (!error && data?.accepted) {
             nativeAccepted = true;
+            // Mark this import for auto-reorder once the background worker finishes.
+            // The watcher effect below detects the terminal status flip.
+            pendingAutoReorderRef.current.add(imp.id);
             const pending = typeof data.pending === "number" ? data.pending : products.length;
             const skipped = data.skipped_already_done ?? 0;
             toast({
@@ -436,6 +573,7 @@ export function ImportTable({
             batch_name: imp.batch_name,
             timestamp: imp.created_at,
             products,
+            upload_mode: mode,
           }),
         });
 
@@ -557,6 +695,8 @@ export function ImportTable({
                 onSend={setApprovalImport}
                 onDelete={setDeleteTarget}
                 onShowStatus={setStatusTarget}
+                onRollback={setRollbackTarget}
+                onReorder={setReorderTarget}
               />
             ))}
           </TableBody>
@@ -581,6 +721,7 @@ export function ImportTable({
         importId={statusTarget?.id ?? null}
         batchName={statusTarget?.batch_name || "Import"}
         importStatus={statusTarget?.status || "pending"}
+        brandId={brandId}
       />
 
       <SendApprovalDialog
@@ -589,13 +730,34 @@ export function ImportTable({
           if (!open) setApprovalImport(null);
         }}
         imp={approvalImport}
-        onApprove={(imp, products) => {
+        onApprove={(imp, products, mode, backup) => {
           setApprovalImport(null);
-          handleTriggerWebhook(imp, products);
+          handleTriggerWebhook(imp, products, mode, backup);
         }}
         isSending={sendingId === approvalImport?.id}
         onDataChange={onStatusChange}
         brandId={brandId}
+      />
+
+      <RollbackDialog
+        open={!!rollbackTarget}
+        onOpenChange={(open) => {
+          if (!open) setRollbackTarget(null);
+        }}
+        importId={rollbackTarget?.id ?? null}
+        batchName={rollbackTarget?.batch_name ?? null}
+        brandId={brandId}
+      />
+
+      <ReorderPreviewDialog
+        open={!!reorderTarget}
+        onOpenChange={(open) => {
+          if (!open) setReorderTarget(null);
+        }}
+        importId={reorderTarget?.id ?? null}
+        batchName={reorderTarget?.batch_name ?? null}
+        brandId={brandId}
+        onApplied={onStatusChange}
       />
 
       <AlertDialog
