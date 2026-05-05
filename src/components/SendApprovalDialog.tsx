@@ -1058,7 +1058,7 @@ function mergeFailedAndOrphans(
       file_url: img.file_url,
       referenceParent: "",
       error:
-        "Not included in any matched Shopify product for this batch. Check the reference parent segment before the first \"-\" in the filename.",
+        "Not included in any matched Shopify product for this batch. Check the reference parent token before the first space or \"-\" in the filename.",
     });
   }
   return [...byUrl.values()];

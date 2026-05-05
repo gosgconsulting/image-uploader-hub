@@ -41,13 +41,13 @@ function stripExtension(fileName: string): string {
 }
 
 /**
- * First segment of the filename stem when split on `-` (e.g. `REF-color-1.jpg` → `REF`).
- * If there is no `-`, the whole stem is used (e.g. `REF.jpg` → `REF`).
+ * First token of the filename stem when split on hyphens or whitespace
+ * (e.g. `REF-color-1.jpg` → `REF`, `REF front.jpg` → `REF`).
  */
 function referenceParentFromFileName(fileName: string): string {
   const stem = stripExtension(fileName);
   if (!stem) return "";
-  const first = stem.split("-")[0]?.trim() ?? "";
+  const first = stem.split(/[\s-]+/)[0]?.trim() ?? "";
   return first;
 }
 
