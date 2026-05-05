@@ -253,12 +253,14 @@ export function ImportTable({
     imp: SendApprovalImport,
     products: WebhookProduct[],
   ) => {
-    const url = imp.webhook_url || webhookUrl;
-    if (!url) {
+    const webhookTarget = imp.webhook_url || webhookUrl;
+    const trimmedBrand = brandId?.trim() ?? "";
+
+    if (!trimmedBrand && !webhookTarget) {
       toast({
-        title: "No webhook URL",
+        title: "Cannot send import",
         description:
-          "Please configure a webhook URL in settings or on the import.",
+          "Select a brand with saved Shopify credentials, or configure a webhook URL in settings.",
         variant: "destructive",
       });
       return;
@@ -273,47 +275,173 @@ export function ImportTable({
 
       onStatusChange();
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          import_id: imp.id,
-          batch_name: imp.batch_name,
-          timestamp: imp.created_at,
-          products: products,
-        }),
-      });
+      type ImportNativeResponse = {
+        success?: boolean;
+        message?: string;
+        failed_product_id?: string;
+      };
 
-      const data = await response.json();
+      let succeeded = false;
+      let blockWebhookDup = false;
 
-      if (data?.success) {
-        await supabase
-          .from("imports")
-          .update({ status: "completed" })
-          .eq("id", imp.id);
-      } else {
+      if (trimmedBrand) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session?.access_token) {
+          const expMs =
+            typeof session.expires_at === "number"
+              ? session.expires_at * 1000
+              : 0;
+          const stale = expMs > 0 && expMs < Date.now() + 90_000;
+          if (stale) await supabase.auth.refreshSession();
+
+          const { data, error } =
+            await supabase.functions.invoke<ImportNativeResponse>(
+              "shopify-import-media",
+              {
+                body: {
+                  brand_id: trimmedBrand,
+                  import_id: imp.id,
+                  batch_name: imp.batch_name,
+                  timestamp: imp.created_at,
+                  products,
+                },
+              },
+            );
+
+          if (!error && data?.success) {
+            await supabase
+              .from("imports")
+              .update({ status: "completed" })
+              .eq("id", imp.id);
+            succeeded = true;
+            toast({
+              title: "Images uploaded",
+              description: "Product media was added in Shopify.",
+            });
+          } else if (!webhookTarget) {
+            await supabase
+              .from("imports")
+              .update({ status: "failed" })
+              .eq("id", imp.id);
+
+            let description =
+              typeof data?.message === "string"
+                ? data.message
+                : ("Save Shopify credentials for this brand under Settings." as const);
+
+            if (error?.message?.trim())
+              description = error.message.trim();
+
+            toast({
+              title: "Shopify upload failed",
+              description,
+              variant: "destructive",
+            });
+          } else {
+            const credOrInfra =
+              Boolean(error) ||
+              (typeof data?.message === "string" &&
+                /No Shopify credentials saved for this brand/i.test(
+                  data.message
+                ));
+
+            if (!credOrInfra) {
+              blockWebhookDup = true;
+              await supabase
+                .from("imports")
+                .update({ status: "failed" })
+                .eq("id", imp.id);
+              toast({
+                title: "Shopify upload failed",
+                description:
+                  typeof data?.message === "string"
+                    ? data.message
+                    : "Shopify rejected the upload.",
+                variant: "destructive",
+              });
+            }
+          }
+        } else if (!webhookTarget) {
+          await supabase
+            .from("imports")
+            .update({ status: "failed" })
+            .eq("id", imp.id);
+          toast({
+            title: "Session expired",
+            description: "Sign in again to upload images to Shopify.",
+            variant: "destructive",
+          });
+        }
+      }
+
+      if (!succeeded && webhookTarget && !blockWebhookDup) {
+        const response = await fetch(webhookTarget, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            import_id: imp.id,
+            batch_name: imp.batch_name,
+            timestamp: imp.created_at,
+            products,
+          }),
+        });
+
+        let parsed: { success?: boolean } = {};
+        try {
+          parsed = await response.json();
+        } catch {
+          parsed = {};
+        }
+
+        if (parsed?.success) {
+          await supabase
+            .from("imports")
+            .update({ status: "completed" })
+            .eq("id", imp.id);
+          toast({
+            title: webhookTarget && trimmedBrand ? "Imported via webhook" : "Webhook triggered",
+            description:
+              webhookTarget && trimmedBrand
+                ? "Native upload unavailable; automation completed the run."
+                : "Import data sent. Check your automation tool for status.",
+          });
+          succeeded = true;
+        } else {
+          await supabase
+            .from("imports")
+            .update({ status: "failed" })
+            .eq("id", imp.id);
+          toast({
+            title: "Webhook failed",
+            description: "The automation endpoint did not confirm success.",
+            variant: "destructive",
+          });
+        }
+      }
+
+      onStatusChange();
+    } catch {
+      try {
         await supabase
           .from("imports")
           .update({ status: "failed" })
           .eq("id", imp.id);
-        console.log("ERROR ==========>", data);
+      } catch {
+        /* ignore */
       }
-      onStatusChange();
-
       toast({
-        title: "Webhook triggered",
-        description: "Import data sent. Check your automation tool for status.",
-      });
-    } catch {
-      toast({
-        title: "Failed to trigger webhook",
-        description: "Check the webhook URL and try again.",
+        title: "Upload failed",
+        description: "Something went wrong. Try again.",
         variant: "destructive",
       });
+      onStatusChange();
     } finally {
       setSendingId(null);
     }
-  }, [webhookUrl, onStatusChange, toast]);
+  }, [brandId, webhookUrl, onStatusChange, toast]);
 
   const handleConfirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
