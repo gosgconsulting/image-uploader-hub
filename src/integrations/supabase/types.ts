@@ -178,6 +178,38 @@ export type Database = {
           },
         ]
       }
+      shopify_reference_product_cache: {
+        Row: {
+          brand_id: string
+          reference_parent: string
+          product_id: string | null
+          product_title: string | null
+          verified_at: string
+        }
+        Insert: {
+          brand_id: string
+          reference_parent: string
+          product_id?: string | null
+          product_title?: string | null
+          verified_at?: string
+        }
+        Update: {
+          brand_id?: string
+          reference_parent?: string
+          product_id?: string | null
+          product_title?: string | null
+          verified_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopify_reference_product_cache_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shopify_credentials: {
         Row: {
           id: string

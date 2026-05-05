@@ -1,3 +1,8 @@
+import {
+  loadReferenceProductCacheRows,
+  REFERENCE_PRODUCT_CACHE_TTL_MS,
+  upsertReferenceProductCacheRows,
+} from "@/lib/shopifyReferenceProductCache";
 import { fetchProductByReferenceParent } from "@/utils/shopifyProductVariantBySku";
 
 export interface ImportImageRow {
@@ -33,6 +38,8 @@ export interface ImageMapGroupedProduct {
   images: { file_name: string; file_url: string }[];
 }
 
+type FetchRefResult = Awaited<ReturnType<typeof fetchProductByReferenceParent>>;
+
 function stripExtension(fileName: string): string {
   const base = fileName.replace(/\\/g, "/").split("/").pop() ?? fileName;
   const dot = base.lastIndexOf(".");
@@ -51,10 +58,38 @@ function referenceParentFromFileName(fileName: string): string {
   return first;
 }
 
+const SHOPIFY_FETCH_CONCURRENCY = 8;
+
+async function fetchRefsFromShopifyInParallel(
+  shop: string,
+  adminAccessToken: string,
+  refs: string[],
+): Promise<Map<string, FetchRefResult>> {
+  const out = new Map<string, FetchRefResult>();
+  for (let i = 0; i < refs.length; i += SHOPIFY_FETCH_CONCURRENCY) {
+    const chunk = refs.slice(i, i + SHOPIFY_FETCH_CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async (ref) => {
+        const fr = await fetchProductByReferenceParent(
+          shop,
+          adminAccessToken,
+          ref,
+        );
+        return { ref, fr };
+      }),
+    );
+    for (const { ref, fr } of results) {
+      out.set(ref, fr);
+    }
+  }
+  return out;
+}
+
 export async function mapImportImagesToShopifyProducts(
   shop: string,
   adminAccessToken: string,
   images: ImportImageRow[],
+  brandId: string | null,
 ): Promise<{
   filtered: ImageMapProductRow[];
   grouped: ImageMapGroupedProduct[];
@@ -63,10 +98,81 @@ export async function mapImportImagesToShopifyProducts(
   const filtered: ImageMapProductRow[] = [];
   const failed: ImageMapFailedRow[] = [];
 
-  const cache = new Map<
-    string,
-    Awaited<ReturnType<typeof fetchProductByReferenceParent>>
-  >();
+  const refsInOrder: string[] = [];
+  const refSet = new Set<string>();
+  for (const img of images) {
+    const ref = referenceParentFromFileName(img.file_name);
+    if (!ref) continue;
+    if (!refSet.has(ref)) {
+      refSet.add(ref);
+      refsInOrder.push(ref);
+    }
+  }
+
+  const memoryCache = new Map<string, FetchRefResult>();
+  const now = Date.now();
+
+  if (brandId?.trim()) {
+    try {
+      const rows = await loadReferenceProductCacheRows(brandId, refsInOrder);
+      const rowByRef = new Map(rows.map((r) => [r.reference_parent, r]));
+
+      for (const ref of refsInOrder) {
+        const row = rowByRef.get(ref);
+        if (!row) continue;
+        const age = now - new Date(row.verified_at).getTime();
+        if (age > REFERENCE_PRODUCT_CACHE_TTL_MS) continue;
+
+        if (row.product_id) {
+          memoryCache.set(ref, {
+            ok: true,
+            shopifyStatus: 200,
+            hit: {
+              productId: row.product_id,
+              title: row.product_title ?? "",
+            },
+          });
+        } else {
+          memoryCache.set(ref, { ok: true, shopifyStatus: 200, hit: null });
+        }
+      }
+    } catch {
+      // If cache read fails, continue with Shopify only (same as no brand).
+    }
+  }
+
+  const needFetch = refsInOrder.filter((ref) => !memoryCache.has(ref));
+
+  if (needFetch.length > 0) {
+    const fetched = await fetchRefsFromShopifyInParallel(
+      shop,
+      adminAccessToken,
+      needFetch,
+    );
+    for (const [ref, fr] of fetched) {
+      memoryCache.set(ref, fr);
+    }
+
+    if (brandId?.trim()) {
+      const toWrite = needFetch
+        .map((ref) => {
+          const fr = fetched.get(ref);
+          if (!fr?.ok) return null;
+          return {
+            reference_parent: ref,
+            product_id: fr.hit?.productId ?? null,
+            product_title: fr.hit?.title ?? null,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null);
+
+      try {
+        await upsertReferenceProductCacheRows(brandId.trim(), toWrite);
+      } catch {
+        // Mapping result is still valid; cache is a performance optimization.
+      }
+    }
+  }
 
   for (const img of images) {
     const ref = referenceParentFromFileName(img.file_name);
@@ -83,13 +189,19 @@ export async function mapImportImagesToShopifyProducts(
       continue;
     }
 
-    let fr = cache.get(ref);
-    if (fr === undefined) {
-      fr = await fetchProductByReferenceParent(shop, adminAccessToken, ref);
-      cache.set(ref, fr);
+    const fr = memoryCache.get(ref);
+    if (!fr) {
+      failed.push({
+        id: img.id,
+        file_name: img.file_name,
+        file_url: img.file_url,
+        referenceParent: ref,
+        error: "Internal error: missing resolution for reference parent.",
+      });
+      continue;
     }
 
-    if (!fr.ok) {
+    if (fr.ok === false) {
       failed.push({
         id: img.id,
         file_name: img.file_name,

@@ -570,6 +570,7 @@ export function SendApprovalDialog({
         creds.shop,
         creds.token,
         images,
+        brandId,
       );
 
       const matchedRows = filtered as WebhookProduct[];
