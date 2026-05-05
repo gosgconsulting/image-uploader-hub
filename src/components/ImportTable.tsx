@@ -9,7 +9,6 @@ import {
   ListChecks,
   History,
   ArrowUpDown,
-  UploadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -94,7 +93,6 @@ type ImportTableRowProps = {
   deletingId: string | null;
   onPreview: (imp: ImportListRow) => void;
   onSend: (imp: ImportListRow) => void;
-  onResumePending: (imp: ImportListRow) => void;
   onDelete: (imp: ImportListRow) => void;
   onShowStatus: (imp: ImportListRow) => void;
   onRollback: (imp: ImportListRow) => void;
@@ -107,7 +105,6 @@ const ImportTableRow = memo(function ImportTableRow({
   deletingId,
   onPreview,
   onSend,
-  onResumePending,
   onDelete,
   onShowStatus,
   onRollback,
@@ -256,22 +253,6 @@ const ImportTableRow = memo(function ImportTableRow({
               <Send className="h-3.5 w-3.5" />
             )}
           </Button>
-          {(imp.pending_count ?? 0) > 0 &&
-            imp.status !== "queued" &&
-            imp.status !== "processing" &&
-            (imp.succeeded_count ?? 0) + (imp.failed_count ?? 0) > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                onClick={() => onResumePending(imp)}
-                disabled={sendDisabled}
-                aria-label="Upload missing pending images"
-                title={`Upload ${imp.pending_count} pending image${imp.pending_count === 1 ? "" : "s"} that weren't processed yet`}
-              >
-                <UploadCloud className="h-3.5 w-3.5" />
-              </Button>
-            )}
           <Button
             variant="ghost"
             size="sm"
@@ -342,7 +323,6 @@ export function ImportTable({
     loading: boolean;
   } | null>(null);
   const [approvalImport, setApprovalImport] = useState<ImportListRow | null>(null);
-  const [resumeImport, setResumeImport] = useState<ImportListRow | null>(null);
   const [statusTarget, setStatusTarget] = useState<ImportListRow | null>(null);
   const [rollbackTarget, setRollbackTarget] = useState<ImportListRow | null>(null);
   const { toast } = useToast();
@@ -710,7 +690,6 @@ export function ImportTable({
                 deletingId={deletingId}
                 onPreview={openPreview}
                 onSend={setApprovalImport}
-                onResumePending={setResumeImport}
                 onDelete={setDeleteTarget}
                 onShowStatus={setStatusTarget}
                 onRollback={setRollbackTarget}
@@ -755,22 +734,6 @@ export function ImportTable({
         isSending={sendingId === approvalImport?.id}
         onDataChange={onStatusChange}
         brandId={brandId}
-      />
-
-      <SendApprovalDialog
-        open={!!resumeImport}
-        onOpenChange={(open) => {
-          if (!open) setResumeImport(null);
-        }}
-        imp={resumeImport}
-        onApprove={(imp, products, mode, backup) => {
-          setResumeImport(null);
-          handleTriggerWebhook(imp, products, mode, backup);
-        }}
-        isSending={sendingId === resumeImport?.id}
-        onDataChange={onStatusChange}
-        brandId={brandId}
-        statusFilter={["pending"]}
       />
 
       <RollbackDialog

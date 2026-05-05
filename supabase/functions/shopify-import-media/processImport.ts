@@ -343,17 +343,20 @@ export async function prepareImportImages(
   importId: string,
   productRows: Array<ProductImageRow & { id: string }>,
 ): Promise<{ pendingCount: number; skippedAlreadyDoneCount: number }> {
-  const { data: existing } = await admin
-    .from("shopify_import_images")
-    .select("id, status")
-    .eq("import_id", importId)
-    .in("id", productRows.map((p) => p.id));
-
-  const existingById = new Map<string, { status: string }>();
-  for (const row of existing ?? []) {
-    existingById.set(row.id as string, {
-      status: (row as { status: string }).status,
-    });
+  // Fetch all already-succeeded row IDs for this import with pagination — using
+  // `.in("id", [...])` would silently cap at 1000 rows for large imports.
+  const succeededIds = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data: rows } = await admin
+      .from("shopify_import_images")
+      .select("id")
+      .eq("import_id", importId)
+      .eq("status", "succeeded")
+      .range(from, from + PAGE - 1);
+    const batch = (rows ?? []) as Array<{ id: string }>;
+    for (const r of batch) succeededIds.add(r.id);
+    if (batch.length < PAGE) break;
   }
 
   let pendingCount = 0;
@@ -361,8 +364,7 @@ export async function prepareImportImages(
 
   await Promise.all(
     productRows.map(async (p) => {
-      const cur = existingById.get(p.id);
-      if (cur?.status === "succeeded") {
+      if (succeededIds.has(p.id)) {
         skippedAlreadyDoneCount += 1;
         return;
       }
