@@ -2610,6 +2610,8 @@ export type Database = {
         Row: {
           brand_id: string
           created_at: string
+          footer_page_id: string | null
+          header_page_id: string | null
           id: string
           is_default: boolean
           name: string
@@ -2620,6 +2622,8 @@ export type Database = {
         Insert: {
           brand_id: string
           created_at?: string
+          footer_page_id?: string | null
+          header_page_id?: string | null
           id?: string
           is_default?: boolean
           name: string
@@ -2630,6 +2634,8 @@ export type Database = {
         Update: {
           brand_id?: string
           created_at?: string
+          footer_page_id?: string | null
+          header_page_id?: string | null
           id?: string
           is_default?: boolean
           name?: string
@@ -2643,6 +2649,20 @@ export type Database = {
             columns: ["brand_id"]
             isOneToOne: false
             referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brand_websites_footer_page_id_fkey"
+            columns: ["footer_page_id"]
+            isOneToOne: false
+            referencedRelation: "generated_pages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brand_websites_header_page_id_fkey"
+            columns: ["header_page_id"]
+            isOneToOne: false
+            referencedRelation: "generated_pages"
             referencedColumns: ["id"]
           },
           {
@@ -9146,6 +9166,7 @@ export type Database = {
           source_project: string | null
           status: string
           updated_at: string
+          upload_mode: string
           webhook_url: string | null
         }
         Insert: {
@@ -9159,6 +9180,7 @@ export type Database = {
           source_project?: string | null
           status?: string
           updated_at?: string
+          upload_mode?: string
           webhook_url?: string | null
         }
         Update: {
@@ -9172,6 +9194,7 @@ export type Database = {
           source_project?: string | null
           status?: string
           updated_at?: string
+          upload_mode?: string
           webhook_url?: string | null
         }
         Relationships: [
@@ -11209,6 +11232,42 @@ export type Database = {
           recommendations?: string[] | null
           session_metadata?: Json | null
           user_id?: string
+        }
+        Relationships: []
+      }
+      theme_sections: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          schema: Json
+          tags: string[]
+          theme: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          description?: string | null
+          id: string
+          name: string
+          schema: Json
+          tags?: string[]
+          theme: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          schema?: Json
+          tags?: string[]
+          theme?: string
+          updated_at?: string
         }
         Relationships: []
       }

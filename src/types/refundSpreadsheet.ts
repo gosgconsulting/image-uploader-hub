@@ -15,6 +15,20 @@ export interface RefundWorkbookSheetMeta {
   suggestedImportNames: string[];
 }
 
+export const REFUND_FIELD_KEYS = [
+  "numero_commande",
+  "provenance",
+  "date",
+  "nom_produit",
+  "raison_retour",
+  "lien_shopify",
+] as const;
+
+export type RefundFieldKey = (typeof REFUND_FIELD_KEYS)[number];
+
+export type RefundColumnMapping = Partial<Record<RefundFieldKey, string>>;
+
 export interface ParseRefundSpreadsheetOptions {
   sheetNames?: string[];
+  columnMapping?: RefundColumnMapping;
 }

@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Upload, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
+import { Upload, FileSpreadsheet, FileText, Loader2, ArrowLeft, ArrowRight } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RefundImportSheetPicker } from "@/components/RefundImportSheetPicker";
+import { RefundImportMapping } from "@/components/RefundImportMapping";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Refund } from "@/types/refund";
@@ -17,6 +18,11 @@ import {
   parseRefundSpreadsheetBuffer,
   groupsToRefundRows,
 } from "@/utils/parseRefundSpreadsheet";
+import {
+  getRefundSheetHeaders,
+  autoMapRefundColumns,
+} from "@/utils/refundSpreadsheetWorkbook";
+import type { RefundColumnMapping } from "@/types/refundSpreadsheet";
 import { useRefundImportWorkbook } from "@/pages/refund/useRefundImportWorkbook";
 
 interface RefundImportDialogProps {
@@ -44,6 +50,9 @@ function isSpreadsheetFile(file: File): boolean {
 function isPdfFile(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
+
+type Step = "select" | "mapping";
+
 export function RefundImportDialog({
   open,
   onOpenChange,
@@ -52,6 +61,11 @@ export function RefundImportDialog({
   const [sheetFile, setSheetFile] = useState<File | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<Step>("select");
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [autoMapping, setAutoMapping] = useState<RefundColumnMapping>({});
+  const [mapping, setMapping] = useState<RefundColumnMapping>({});
+  const [preparingMapping, setPreparingMapping] = useState(false);
   const { toast } = useToast();
   const {
     meta,
@@ -67,16 +81,21 @@ export function RefundImportDialog({
     setSheetFile(null);
     setPdfFile(null);
     setBusy(false);
+    setStep("select");
+    setHeaders([]);
+    setAutoMapping({});
+    setMapping({});
+    setPreparingMapping(false);
   }, []);
 
   const handleClose = (val: boolean) => {
-    if (!busy) {
+    if (!busy && !preparingMapping) {
       onOpenChange(val);
       if (!val) reset();
     }
   };
 
-  const handleSubmit = async () => {
+  const handleProceedToMapping = async () => {
     if (!sheetFile) {
       toast({
         title: "Spreadsheet required",
@@ -94,11 +113,51 @@ export function RefundImportDialog({
       return;
     }
 
+    setPreparingMapping(true);
+    try {
+      const buffer = await sheetFile.arrayBuffer();
+      const detectedHeaders = getRefundSheetHeaders(buffer, namesToImport);
+      if (detectedHeaders.length === 0) {
+        toast({
+          title: "No columns detected",
+          description: "The selected sheet has no header row.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const auto = autoMapRefundColumns(detectedHeaders);
+      setHeaders(detectedHeaders);
+      setAutoMapping(auto);
+      setMapping(auto);
+      setStep("mapping");
+    } catch (e) {
+      toast({
+        title: "Could not read file",
+        description: e instanceof Error ? e.message : "Invalid spreadsheet.",
+        variant: "destructive",
+      });
+    } finally {
+      setPreparingMapping(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!sheetFile) return;
+    if (!mapping.numero_commande) {
+      toast({
+        title: "Order ID is required",
+        description: "Map the Order ID field to a column before importing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setBusy(true);
     try {
       const buffer = await sheetFile.arrayBuffer();
       const groups = parseRefundSpreadsheetBuffer(buffer, {
         sheetNames: namesToImport,
+        columnMapping: mapping,
       });
       let pdfUrl: string | undefined;
       if (pdfFile) {
@@ -136,113 +195,153 @@ export function RefundImportDialog({
     }
   };
 
-  const importDisabled =
-    busy || !sheetFile || scanning || namesToImport.length === 0;
+  const proceedDisabled =
+    preparingMapping || !sheetFile || scanning || namesToImport.length === 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-mono">New import</DialogTitle>
+          <DialogTitle className="font-mono">
+            {step === "select" ? "New import" : "Map columns"}
+          </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-5 py-2">
-          <div className="space-y-2">
-            <Label className="font-mono text-xs uppercase tracking-wider flex items-center gap-2">
-              <FileSpreadsheet className="h-3.5 w-3.5" />
-              Excel or CSV <span className="text-destructive">*</span>
-            </Label>
-            <input
-              type="file"
-              accept={ACCEPT_SHEET}
-              className="text-sm w-full file:mr-3 file:rounded file:border file:bg-muted file:px-2 file:py-1"
-              disabled={busy}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f && isSpreadsheetFile(f)) setSheetFile(f);
-                else if (f) {
-                  toast({
-                    title: "Wrong file type",
-                    description: "Use .csv, .xlsx, or .xls.",
-                    variant: "destructive",
-                  });
-                }
-              }}
-            />
-            {sheetFile && (
-              <p className="text-xs text-muted-foreground font-mono">{sheetFile.name}</p>
+        {step === "select" && (
+          <div className="space-y-5 py-2">
+            <div className="space-y-2">
+              <Label className="font-mono text-xs uppercase tracking-wider flex items-center gap-2">
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                Excel or CSV <span className="text-destructive">*</span>
+              </Label>
+              <input
+                type="file"
+                accept={ACCEPT_SHEET}
+                className="text-sm w-full file:mr-3 file:rounded file:border file:bg-muted file:px-2 file:py-1"
+                disabled={busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f && isSpreadsheetFile(f)) setSheetFile(f);
+                  else if (f) {
+                    toast({
+                      title: "Wrong file type",
+                      description: "Use .csv, .xlsx, or .xls.",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+              />
+              {sheetFile && (
+                <p className="text-xs text-muted-foreground font-mono">{sheetFile.name}</p>
+              )}
+              {scanning && (
+                <p className="text-xs text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
+                  Reading tabs…
+                </p>
+              )}
+            </div>
+
+            {showSheetPicker && meta && (
+              <RefundImportSheetPicker
+                meta={meta}
+                pivotSet={pivotSet}
+                selectedSheetNames={selectedSheetNames}
+                toggleSheet={toggleSheet}
+                disabled={busy}
+              />
             )}
-            {scanning && (
-              <p className="text-xs text-muted-foreground flex items-center gap-2">
-                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
-                Reading tabs…
-              </p>
-            )}
+
+            <div className="space-y-2">
+              <Label className="font-mono text-xs uppercase tracking-wider flex items-center gap-2">
+                <FileText className="h-3.5 w-3.5" />
+                PDF <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <input
+                type="file"
+                accept=".pdf,application/pdf"
+                className="text-sm w-full file:mr-3 file:rounded file:border file:bg-muted file:px-2 file:py-1"
+                disabled={busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f && isPdfFile(f)) setPdfFile(f);
+                  else if (f) {
+                    toast({
+                      title: "Wrong file type",
+                      description: "Use a PDF file.",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+              />
+              {pdfFile && (
+                <p className="text-xs text-muted-foreground font-mono">{pdfFile.name}</p>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Pick tabs when there are several; pivot sheets are disabled. Multiple tabs merge;{" "}
+              <span className="font-mono">page</span> is prefixed by tab. Columns:{" "}
+              <span className="font-mono">numero_commande</span>, <span className="font-mono">provenance</span>,{" "}
+              <span className="font-mono">date</span>, <span className="font-mono">nom_produit</span>,{" "}
+              <span className="font-mono">raison_retour</span>, <span className="font-mono">lien_shopify</span>.
+            </p>
           </div>
+        )}
 
-          {showSheetPicker && meta && (
-            <RefundImportSheetPicker
-              meta={meta}
-              pivotSet={pivotSet}
-              selectedSheetNames={selectedSheetNames}
-              toggleSheet={toggleSheet}
+        {step === "mapping" && (
+          <div className="py-2">
+            <RefundImportMapping
+              headers={headers}
+              mapping={mapping}
+              autoMapping={autoMapping}
+              onChange={setMapping}
               disabled={busy}
             />
-          )}
-
-          <div className="space-y-2">
-            <Label className="font-mono text-xs uppercase tracking-wider flex items-center gap-2">
-              <FileText className="h-3.5 w-3.5" />
-              PDF <span className="text-muted-foreground font-normal">(optional)</span>
-            </Label>
-            <input
-              type="file"
-              accept=".pdf,application/pdf"
-              className="text-sm w-full file:mr-3 file:rounded file:border file:bg-muted file:px-2 file:py-1"
-              disabled={busy}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f && isPdfFile(f)) setPdfFile(f);
-                else if (f) {
-                  toast({
-                    title: "Wrong file type",
-                    description: "Use a PDF file.",
-                    variant: "destructive",
-                  });
-                }
-              }}
-            />
-            {pdfFile && (
-              <p className="text-xs text-muted-foreground font-mono">{pdfFile.name}</p>
-            )}
           </div>
-
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Pick tabs when there are several; pivot sheets are disabled. Multiple tabs merge;{" "}
-            <span className="font-mono">page</span> is prefixed by tab. Columns:{" "}
-            <span className="font-mono">numero_commande</span>, <span className="font-mono">provenance</span>,{" "}
-            <span className="font-mono">date</span>, <span className="font-mono">nom_produit</span>,{" "}
-            <span className="font-mono">raison_retour</span>, <span className="font-mono">lien_shopify</span>.
-          </p>
-        </div>
+        )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleClose(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={importDisabled}>
-            {busy ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
-                Importing…
-              </>
-            ) : (
-              <>
-                <Upload className="h-3.5 w-3.5 mr-2" />
-                Import
-              </>
-            )}
-          </Button>
+          {step === "select" ? (
+            <>
+              <Button variant="outline" onClick={() => handleClose(false)} disabled={busy || preparingMapping}>
+                Cancel
+              </Button>
+              <Button onClick={handleProceedToMapping} disabled={proceedDisabled}>
+                {preparingMapping ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                    Reading…
+                  </>
+                ) : (
+                  <>
+                    Next
+                    <ArrowRight className="h-3.5 w-3.5 ml-2" />
+                  </>
+                )}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => setStep("select")} disabled={busy}>
+                <ArrowLeft className="h-3.5 w-3.5 mr-2" />
+                Back
+              </Button>
+              <Button onClick={handleSubmit} disabled={busy || !mapping.numero_commande}>
+                {busy ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                    Importing…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-3.5 w-3.5 mr-2" />
+                    Import
+                  </>
+                )}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

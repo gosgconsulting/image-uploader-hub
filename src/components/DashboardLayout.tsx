@@ -17,13 +17,19 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -44,7 +50,7 @@ const coreNavItems = [
 
 const ownerNavItems = [
   { label: "Shopify", to: "/shopify-settings", icon: Store },
-  { label: "Team", to: "/team", icon: Users },
+  { label: "Users", to: "/users", icon: Users },
 ];
 
 export function DashboardLayout() {
@@ -55,6 +61,7 @@ export function DashboardLayout() {
   const [addBrandOpen, setAddBrandOpen] = useState(false);
   const [newBrandName, setNewBrandName] = useState("");
   const [creatingBrand, setCreatingBrand] = useState(false);
+  const [brandPickerOpen, setBrandPickerOpen] = useState(false);
   const {
     brands,
     selectedBrand,
@@ -120,8 +127,8 @@ export function DashboardLayout() {
         </div>
 
         <div className="px-2 pb-3 space-y-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          <Popover open={brandPickerOpen} onOpenChange={setBrandPickerOpen}>
+            <PopoverTrigger asChild>
               <Button
                 variant="outline"
                 size="sm"
@@ -136,41 +143,60 @@ export function DashboardLayout() {
                 </span>
                 <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-48">
-              <DropdownMenuLabel className="font-mono text-xs text-muted-foreground">
-                Brands
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {brands.map((brand) => (
-                <DropdownMenuItem
-                  key={brand.id}
-                  className="font-mono text-xs gap-2 cursor-pointer"
-                  onClick={() => selectBrand(brand.id)}
-                >
-                  <Check
-                    className={cn(
-                      "h-3.5 w-3.5 shrink-0",
-                      selectedBrand?.id === brand.id ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                  {brand.name}
-                </DropdownMenuItem>
-              ))}
-              {showBrandAdminControls ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="font-mono text-xs gap-2 cursor-pointer"
-                    onClick={() => setAddBrandOpen(true)}
-                  >
-                    <Plus className="h-3.5 w-3.5 shrink-0" />
-                    Add brand…
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-48 p-0">
+              <Command>
+                <CommandInput
+                  placeholder="Search brands…"
+                  className="h-9 font-mono text-xs"
+                />
+                <CommandList>
+                  <CommandEmpty className="py-4 text-center text-xs font-mono text-muted-foreground">
+                    No brand found.
+                  </CommandEmpty>
+                  <CommandGroup heading="Brands">
+                    {brands.map((brand) => (
+                      <CommandItem
+                        key={brand.id}
+                        value={brand.name}
+                        onSelect={() => {
+                          selectBrand(brand.id);
+                          setBrandPickerOpen(false);
+                        }}
+                        className="font-mono text-xs gap-2 cursor-pointer"
+                      >
+                        <Check
+                          className={cn(
+                            "h-3.5 w-3.5 shrink-0",
+                            selectedBrand?.id === brand.id ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                        {brand.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                  {showBrandAdminControls ? (
+                    <>
+                      <CommandSeparator />
+                      <CommandGroup>
+                        <CommandItem
+                          value="__add_brand__"
+                          onSelect={() => {
+                            setBrandPickerOpen(false);
+                            setAddBrandOpen(true);
+                          }}
+                          className="font-mono text-xs gap-2 cursor-pointer"
+                        >
+                          <Plus className="h-3.5 w-3.5 shrink-0" />
+                          Add brand…
+                        </CommandItem>
+                      </CommandGroup>
+                    </>
+                  ) : null}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
 
           {showBrandAdminControls ? (
             <Button

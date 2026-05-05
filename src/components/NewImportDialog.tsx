@@ -10,8 +10,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { resizeImagesForShopify } from "@/lib/image-resize";
+import { startImportUpload } from "@/lib/import-upload-queue";
 
 interface NewImportDialogProps {
   open: boolean;
@@ -20,6 +23,11 @@ interface NewImportDialogProps {
   /** Required when creating an import row (scoped to the dashboard brand). */
   brandId: string | null;
 }
+
+type Stage =
+  | { kind: "idle" }
+  | { kind: "resizing"; done: number; total: number }
+  | { kind: "creating" };
 
 export function NewImportDialog({
   open,
@@ -30,8 +38,11 @@ export function NewImportDialog({
   const [batchName, setBatchName] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [stage, setStage] = useState<Stage>({ kind: "idle" });
+  const [resizeForShopify, setResizeForShopify] = useState(true);
   const { toast } = useToast();
+
+  const isBusy = stage.kind !== "idle";
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -78,55 +89,76 @@ export function NewImportDialog({
       return;
     }
 
-    setIsUploading(true);
     try {
-      // Sparti requires `batch_name` NOT NULL, so default empty input to "Untitled".
-      const trimmedBrand = brandId.trim();
-      const { data: importData, error: importError } = await supabase
-        .from("shopify_imports")
-        .insert({
-          batch_name: batchName.trim() || "Untitled",
-          brand_id: trimmedBrand,
-        })
-        .select()
-        .single();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("You must be signed in.");
 
-      if (importError || !importData) throw importError;
-
-      // Upload each file. Position is 1-based and required by shopify_import_images.
-      const imageRecords = [];
-      let position = 1;
-      for (const file of files) {
-        const filePath = `${importData.id}/${file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from("shopify-import-images")
-          .upload(filePath, file);
-
-        if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage
-          .from("shopify-import-images")
-          .getPublicUrl(filePath);
-
-        imageRecords.push({
-          import_id: importData.id,
-          brand_id: trimmedBrand,
-          file_name: file.name,
-          file_url: urlData.publicUrl,
-          file_size: file.size,
-          position: position++,
+      // Stage 1: optionally resize each image client-side. For 1000+ photos at 4–7 MB
+      // each, this is the difference between a 30s upload and a 30-minute one.
+      let processed = files;
+      if (resizeForShopify) {
+        setStage({ kind: "resizing", done: 0, total: files.length });
+        const resized = await resizeImagesForShopify(files, {
+          concurrency: 4,
+          onProgress: (done, total) =>
+            setStage({ kind: "resizing", done, total }),
         });
+        processed = resized.map((r) => r.file);
       }
 
-      const { error: imgError } = await supabase
-        .from("shopify_import_images")
-        .insert(imageRecords);
+      setStage({ kind: "creating" });
 
-      if (imgError) throw imgError;
+      // Stage 2: ask the edge function to create the import + sign upload URLs.
+      const { data: createRes, error: createErr } = await supabase.functions.invoke<{
+        ok?: boolean;
+        error?: string;
+        import_id?: string;
+        uploads?: Array<{ file_name: string; path: string; token: string; public_url: string }>;
+      }>("shopify-import-create", {
+        body: {
+          brand_id: brandId.trim(),
+          batch_name: batchName.trim() || "Untitled",
+          files: processed.map((f) => ({ name: f.name, size: f.size })),
+        },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (createErr) {
+        const ctx = (createErr as { context?: Response }).context;
+        if (ctx instanceof Response) {
+          try {
+            const body = await ctx.clone().json();
+            if (body?.error) throw new Error(body.error);
+          } catch (parseErr) {
+            if (parseErr instanceof Error && parseErr.message !== createErr.message) throw parseErr;
+          }
+        }
+        throw createErr;
+      }
+      if (!createRes?.ok || !createRes.uploads || !createRes.import_id) {
+        throw new Error(createRes?.error || "Could not create import");
+      }
+      if (createRes.uploads.length !== processed.length) {
+        throw new Error("Server did not return an upload slot for every file");
+      }
 
-      toast({ title: "Import created", description: `${files.length} images uploaded.` });
+      // Stage 3: hand the work to the module-level upload queue and close immediately.
+      // The queue keeps running even if the dialog or page route unmounts; the imports
+      // list shows live progress for any in-flight uploads.
+      startImportUpload({
+        importId: createRes.import_id,
+        files: processed,
+        uploads: createRes.uploads.map((u) => ({ path: u.path, token: u.token })),
+      });
+
+      toast({
+        title: "Upload started in background",
+        description: `${processed.length} image${processed.length === 1 ? "" : "s"} uploading. You can close this dialog.`,
+      });
       setBatchName("");
       setFiles([]);
+      setStage({ kind: "idle" });
       onOpenChange(false);
       onImportCreated();
     } catch (err: any) {
@@ -135,20 +167,28 @@ export function NewImportDialog({
         description: err?.message || "Something went wrong.",
         variant: "destructive",
       });
-    } finally {
-      setIsUploading(false);
+      setStage({ kind: "idle" });
     }
   };
 
   const handleClose = (val: boolean) => {
-    if (!isUploading) {
-      onOpenChange(val);
-      if (!val) {
-        setBatchName("");
-        setFiles([]);
-      }
+    // While we're resizing or talking to the edge function, the dialog must stay open
+    // to surface progress. After we hand off to the queue we set stage back to idle.
+    if (isBusy) return;
+    onOpenChange(val);
+    if (!val) {
+      setBatchName("");
+      setFiles([]);
     }
   };
+
+  const submitLabel = (() => {
+    if (stage.kind === "resizing") {
+      return `Resizing ${stage.done} / ${stage.total}…`;
+    }
+    if (stage.kind === "creating") return "Starting upload…";
+    return `Upload ${files.length} image${files.length !== 1 ? "s" : ""}`;
+  })();
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -167,6 +207,7 @@ export function NewImportDialog({
               placeholder="e.g. Spring Collection 2025"
               value={batchName}
               onChange={(e) => setBatchName(e.target.value)}
+              disabled={isBusy}
             />
           </div>
 
@@ -180,7 +221,7 @@ export function NewImportDialog({
                 relative flex flex-col items-center justify-center rounded-md border-2 border-dashed p-8 transition-colors cursor-pointer
                 ${isDragging ? "border-accent bg-accent/5" : "border-border hover:border-muted-foreground/40"}
               `}
-              onClick={() => document.getElementById("file-input")?.click()}
+              onClick={() => !isBusy && document.getElementById("file-input")?.click()}
             >
               <Upload className="h-8 w-8 text-muted-foreground mb-2" />
               <p className="text-sm text-muted-foreground">
@@ -196,9 +237,26 @@ export function NewImportDialog({
                 accept="image/*"
                 className="hidden"
                 onChange={handleFileSelect}
+                disabled={isBusy}
               />
             </div>
           </div>
+
+          <label className="flex items-start gap-2 text-xs text-muted-foreground">
+            <Checkbox
+              checked={resizeForShopify}
+              onCheckedChange={(v) => setResizeForShopify(v === true)}
+              disabled={isBusy}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-mono">Resize for Shopify (recommended)</span>
+              <br />
+              Shrinks each image to <span className="font-mono">2048&nbsp;px</span> wide,
+              re-encoded as JPEG quality 85. Typical 4–7 MB photos drop to 200–800 KB,
+              well under the&nbsp;1&nbsp;MB target.
+            </span>
+          </label>
 
           {files.length > 0 && (
             <div className="space-y-1 max-h-48 overflow-y-auto rounded-md border bg-muted/30 p-2">
@@ -212,8 +270,9 @@ export function NewImportDialog({
                     {(file.size / 1024).toFixed(0)}KB
                   </span>
                   <button
-                    onClick={() => removeFile(i)}
-                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => !isBusy && removeFile(i)}
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    disabled={isBusy}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -224,17 +283,17 @@ export function NewImportDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleClose(false)} disabled={isUploading}>
+          <Button variant="outline" onClick={() => handleClose(false)} disabled={isBusy}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={isUploading || files.length === 0}>
-            {isUploading ? (
+          <Button onClick={handleSubmit} disabled={isBusy || files.length === 0}>
+            {isBusy ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Uploading...
+                {submitLabel}
               </>
             ) : (
-              <>Upload {files.length} image{files.length !== 1 ? "s" : ""}</>
+              <>{submitLabel}</>
             )}
           </Button>
         </DialogFooter>
