@@ -274,7 +274,7 @@ export function ImportTable({
     });
     void (async () => {
       const { data, error } = await supabase
-        .from("import_images")
+        .from("shopify_import_images")
         .select("id, file_name, file_url")
         .eq("import_id", imp.id)
         .order("created_at", { ascending: true });
@@ -366,7 +366,7 @@ export function ImportTable({
             });
           } else if (!webhookTarget) {
             await supabase
-              .from("imports")
+              .from("shopify_imports")
               .update({ status: "failed" })
               .eq("id", imp.id);
 
@@ -394,7 +394,7 @@ export function ImportTable({
             if (!credOrInfra) {
               blockWebhookDup = true;
               await supabase
-                .from("imports")
+                .from("shopify_imports")
                 .update({ status: "failed" })
                 .eq("id", imp.id);
               toast({
@@ -409,7 +409,7 @@ export function ImportTable({
           }
         } else if (!webhookTarget) {
           await supabase
-            .from("imports")
+            .from("shopify_imports")
             .update({ status: "failed" })
             .eq("id", imp.id);
           toast({
@@ -423,7 +423,7 @@ export function ImportTable({
       if (!nativeAccepted && webhookTarget && !blockWebhookDup) {
         // Webhook fallback path (no native brand creds): keep prior synchronous behavior.
         await supabase
-          .from("imports")
+          .from("shopify_imports")
           .update({ status: "processing" })
           .eq("id", imp.id);
         onStatusChange();
@@ -448,7 +448,7 @@ export function ImportTable({
 
         if (parsed?.success) {
           await supabase
-            .from("imports")
+            .from("shopify_imports")
             .update({ status: "completed" })
             .eq("id", imp.id);
           toast({
@@ -460,7 +460,7 @@ export function ImportTable({
           });
         } else {
           await supabase
-            .from("imports")
+            .from("shopify_imports")
             .update({ status: "failed" })
             .eq("id", imp.id);
           toast({
@@ -475,7 +475,7 @@ export function ImportTable({
     } catch {
       try {
         await supabase
-          .from("imports")
+          .from("shopify_imports")
           .update({ status: "failed" })
           .eq("id", imp.id);
       } catch {

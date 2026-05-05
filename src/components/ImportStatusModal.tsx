@@ -77,7 +77,7 @@ export function ImportStatusModal({
   const fetchRows = async (id: string) => {
     setLoading(true);
     const { data, error } = await supabase
-      .from("import_images")
+      .from("shopify_import_images")
       .select(
         "id, file_name, file_url, status, shopify_product_id, shopify_product_name, shopify_media_id, error_message, attempts, started_at, completed_at, updated_at",
       )

@@ -83,24 +83,28 @@ interface SendApprovalDialogProps {
 
 async function uploadImageToSupabase(
   importId: string,
+  brandId: string,
   file: File,
 ): Promise<{ file_name: string; file_url: string }> {
   const safeName = `${Date.now()}_${file.name}`;
   const filePath = `${importId}/${safeName}`;
 
   const { error: uploadError } = await supabase.storage
-    .from("import-images")
+    .from("shopify-import-images")
     .upload(filePath, file);
 
   if (uploadError) throw uploadError;
 
   const { data: urlData } = supabase.storage
-    .from("import-images")
+    .from("shopify-import-images")
     .getPublicUrl(filePath);
 
-  // Persist to import_images table so it's tracked
-  await supabase.from("import_images").insert({
+  // Persist to shopify_import_images so the import has a tracked row. brand_id and
+  // position are NOT NULL on Sparti; position defaults to 1 and ordering falls back
+  // to created_at + id, which is fine for ad-hoc uploads added during approval.
+  await supabase.from("shopify_import_images").insert({
     import_id: importId,
+    brand_id: brandId,
     file_name: file.name,
     file_url: urlData.publicUrl,
     file_size: file.size,
@@ -113,6 +117,7 @@ async function uploadImageToSupabase(
 
 interface UploadZoneProps {
   importId: string;
+  brandId: string;
   onUploaded: (images: { file_name: string; file_url: string }[]) => void;
   multiple?: boolean;
   label?: string;
@@ -120,6 +125,7 @@ interface UploadZoneProps {
 
 function UploadZone({
   importId,
+  brandId,
   onUploaded,
   multiple = true,
   label,
@@ -136,7 +142,7 @@ function UploadZone({
       setUploading(true);
       try {
         const results = await Promise.all(
-          images.map((f) => uploadImageToSupabase(importId, f)),
+          images.map((f) => uploadImageToSupabase(importId, brandId, f)),
         );
         onUploaded(results);
       } catch (err: any) {
@@ -149,7 +155,7 @@ function UploadZone({
         setUploading(false);
       }
     },
-    [importId, onUploaded, toast],
+    [importId, brandId, onUploaded, toast],
   );
 
   const onDragOver = (e: React.DragEvent) => {
@@ -542,7 +548,7 @@ export function SendApprovalDialog({
     let images: ImportImage[] = [];
     try {
       const { data: latestImages, error: imgErr } = await supabase
-        .from("import_images")
+        .from("shopify_import_images")
         .select("id, file_name, file_url")
         .eq("import_id", imp.id)
         .order("created_at", { ascending: true });
@@ -701,12 +707,12 @@ export function SendApprovalDialog({
 
     // Best-effort Supabase delete — warn on failure but don't block UI
     try {
-      const storagePath = img.file_url.split("/import-images/")[1];
+      const storagePath = img.file_url.split("/shopify-import-images/")[1];
       if (storagePath) {
-        await supabase.storage.from("import-images").remove([storagePath]);
+        await supabase.storage.from("shopify-import-images").remove([storagePath]);
       }
       await supabase
-        .from("import_images")
+        .from("shopify_import_images")
         .delete()
         .eq("file_url", img.file_url);
       fetchMapData();
@@ -775,6 +781,7 @@ export function SendApprovalDialog({
 
           <UploadZone
             importId={imp.id}
+            brandId={brandId ?? ""}
             label="Drop or click to upload new gallery images"
             onUploaded={() => {
               setEditableProducts([]);

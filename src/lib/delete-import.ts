@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 
-const BUCKET = "import-images";
+const BUCKET = "shopify-import-images";
 const LIST_PAGE = 1000;
 const REMOVE_BATCH = 100;
 
@@ -46,7 +46,7 @@ export async function deleteImportWithStorage(
     }
   }
 
-  const { error: dbError } = await client.from("imports").delete().eq("id", importId);
+  const { error: dbError } = await client.from("shopify_imports").delete().eq("id", importId);
   if (dbError) {
     return { ok: false, message: dbError.message };
   }

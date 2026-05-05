@@ -80,40 +80,46 @@ export function NewImportDialog({
 
     setIsUploading(true);
     try {
-      // Create import record
+      // Sparti requires `batch_name` NOT NULL, so default empty input to "Untitled".
+      const trimmedBrand = brandId.trim();
       const { data: importData, error: importError } = await supabase
-        .from("imports")
-        .insert({ batch_name: batchName || null, brand_id: brandId.trim() })
+        .from("shopify_imports")
+        .insert({
+          batch_name: batchName.trim() || "Untitled",
+          brand_id: trimmedBrand,
+        })
         .select()
         .single();
 
       if (importError || !importData) throw importError;
 
-      // Upload each file
+      // Upload each file. Position is 1-based and required by shopify_import_images.
       const imageRecords = [];
+      let position = 1;
       for (const file of files) {
         const filePath = `${importData.id}/${file.name}`;
         const { error: uploadError } = await supabase.storage
-          .from("import-images")
+          .from("shopify-import-images")
           .upload(filePath, file);
 
         if (uploadError) throw uploadError;
 
         const { data: urlData } = supabase.storage
-          .from("import-images")
+          .from("shopify-import-images")
           .getPublicUrl(filePath);
 
         imageRecords.push({
           import_id: importData.id,
+          brand_id: trimmedBrand,
           file_name: file.name,
           file_url: urlData.publicUrl,
           file_size: file.size,
+          position: position++,
         });
       }
 
-      // Insert image records
       const { error: imgError } = await supabase
-        .from("import_images")
+        .from("shopify_import_images")
         .insert(imageRecords);
 
       if (imgError) throw imgError;

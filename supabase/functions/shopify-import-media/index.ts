@@ -76,7 +76,7 @@ async function handleInternalContinuation(opts: {
   // Resolve shop credentials directly from the import — no user JWT required for
   // continuations because the gateway has already validated our internal token.
   const { data: imp, error: impErr } = await admin
-    .from("imports")
+    .from("shopify_imports")
     .select("id, brand_id, status")
     .eq("id", importId)
     .maybeSingle();
@@ -93,7 +93,7 @@ async function handleInternalContinuation(opts: {
 
   if (!cred?.access_token || !cred.shop_domain) {
     await admin
-      .from("imports")
+      .from("shopify_imports")
       .update({ status: "failed" })
       .eq("id", importId);
     return json({ ok: false, error: "No Shopify credentials" }, 200);
@@ -102,7 +102,7 @@ async function handleInternalContinuation(opts: {
   const shopDomain = normalizeShopDomain(cred.shop_domain);
   if (!shopDomain.endsWith(".myshopify.com")) {
     await admin
-      .from("imports")
+      .from("shopify_imports")
       .update({ status: "failed" })
       .eq("id", importId);
     return json({ ok: false, error: "Invalid shop domain" }, 200);
@@ -253,7 +253,7 @@ serve(async (req) => {
   // work happens in chained continuations so no single invocation has to outlive the
   // runtime's wall-clock budget.
   await admin
-    .from("imports")
+    .from("shopify_imports")
     .update({ status: "queued" })
     .eq("id", importId);
 

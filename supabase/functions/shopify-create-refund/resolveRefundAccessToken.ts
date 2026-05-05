@@ -48,10 +48,12 @@ export async function resolveRefundAccessToken(
       };
     }
 
+    // Sparti uses brand_users.auth_user_id instead of a dedicated brand_members table.
     const { data: memberRows, error: memErr } = await admin
-      .from("brand_members")
+      .from("brand_users")
       .select("brand_id")
-      .eq("member_user_id", user.id);
+      .eq("auth_user_id", user.id)
+      .eq("is_active", true);
 
     const brandIds = (memberRows ?? [])
       .map((r) => (r as { brand_id?: string }).brand_id)

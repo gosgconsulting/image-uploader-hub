@@ -19,11 +19,14 @@ async function userCanAccessBrand(
   if (error || !brand) return false;
   if ((brand as { user_id?: string }).user_id === userId) return true;
 
+  // Sparti uses `brand_users.auth_user_id` instead of a dedicated brand_members table.
+  // Any active brand_user row linked to this auth user counts as access.
   const { data: memberRow } = await admin
-    .from("brand_members")
+    .from("brand_users")
     .select("id")
     .eq("brand_id", brandId)
-    .eq("member_user_id", userId)
+    .eq("auth_user_id", userId)
+    .eq("is_active", true)
     .maybeSingle();
 
   return Boolean(memberRow);
@@ -49,7 +52,7 @@ export async function resolveCredentialAndVerifyImport(opts: {
   }
 
   const { data: imp, error: impErr } = await admin
-    .from("imports")
+    .from("shopify_imports")
     .select("id, brand_id")
     .eq("id", importId)
     .maybeSingle();

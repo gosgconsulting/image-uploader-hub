@@ -108,7 +108,7 @@ export async function prepareImportImages(
   productRows: Array<ProductImageRow & { id: string }>,
 ): Promise<{ pendingCount: number; skippedAlreadyDoneCount: number }> {
   const { data: existing } = await admin
-    .from("import_images")
+    .from("shopify_import_images")
     .select("id, status")
     .eq("import_id", importId)
     .in("id", productRows.map((p) => p.id));
@@ -132,7 +132,7 @@ export async function prepareImportImages(
       }
       pendingCount += 1;
       await admin
-        .from("import_images")
+        .from("shopify_import_images")
         .update({
           status: "pending",
           shopify_product_id: p.productid,
@@ -200,7 +200,7 @@ async function processOneProduct(
     });
 
     await admin
-      .from("import_images")
+      .from("shopify_import_images")
       .update({
         status: "uploading",
         started_at: new Date().toISOString(),
@@ -216,7 +216,7 @@ async function processOneProduct(
     if (!batchResult.ok) {
       const errMsg = batchResult.error.slice(0, 1000);
       await admin
-        .from("import_images")
+        .from("shopify_import_images")
         .update({
           status: "failed",
           error_message: errMsg,
@@ -231,7 +231,7 @@ async function processOneProduct(
       await Promise.all(
         chunk.map((item, idx) =>
           admin
-            .from("import_images")
+            .from("shopify_import_images")
             .update({
               status: "succeeded",
               shopify_media_id: batchResult.mediaIds[idx] ?? null,
@@ -260,7 +260,7 @@ async function finalizeImport(
   importId: string,
 ): Promise<"completed" | "failed" | "partial"> {
   const { data: rows } = await admin
-    .from("import_images")
+    .from("shopify_import_images")
     .select("status")
     .eq("import_id", importId);
 
@@ -280,7 +280,7 @@ async function finalizeImport(
   else finalStatus = "completed";
 
   await admin
-    .from("imports")
+    .from("shopify_imports")
     .update({ status: finalStatus })
     .eq("id", importId);
 
@@ -315,7 +315,7 @@ export async function processNextProduct(opts: {
   // Mark imports.status processing the moment the worker actually starts working — the
   // sync handler only sets `queued`. Idempotent: noop on later invocations.
   await admin
-    .from("imports")
+    .from("shopify_imports")
     .update({ status: "processing" })
     .eq("id", importId)
     .in("status", ["queued", "processing"]);
@@ -323,7 +323,7 @@ export async function processNextProduct(opts: {
   // Pull all pending/uploading rows for this import. We pick the FIRST product (by GID
   // string sort) and process every image in it; the next call gets the next product.
   const { data: rows } = await admin
-    .from("import_images")
+    .from("shopify_import_images")
     .select(
       "id, file_name, file_url, shopify_product_id, shopify_product_name, status",
     )
