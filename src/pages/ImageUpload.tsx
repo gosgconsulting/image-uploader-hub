@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import { Plus, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,15 +30,20 @@ function coerceImageCount(value: unknown): number {
   return 0;
 }
 
+const ACTIVE_STATUSES = new Set(["queued", "processing"]);
+const ACTIVE_POLL_INTERVAL_MS = 4000;
+
 export default function ImageUpload() {
   const { importBrandId } = useOutletContext<DashboardOutletContext>();
   const [imports, setImports] = useState<ImportListRow[]>([]);
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState(() => getInitialWebhookUrl());
+  const importsRef = useRef<ImportListRow[]>([]);
 
   const fetchImports = useCallback(async () => {
     if (!importBrandId) {
       setImports([]);
+      importsRef.current = [];
       return;
     }
     const { data, error } = await supabase
@@ -50,30 +55,55 @@ export default function ImageUpload() {
     if (error) {
       console.error("fetchImports", error);
       setImports([]);
+      importsRef.current = [];
       return;
     }
 
     if (!data) {
       setImports([]);
+      importsRef.current = [];
       return;
     }
 
-    setImports(
-      data.map((row) => ({
-        id: row.id,
-        batch_name: row.batch_name,
-        status: row.status,
-        webhook_url: row.webhook_url,
-        created_at: row.created_at,
-        image_count: coerceImageCount(row.image_count),
-        preview_images: parsePreviewImagesJson(row.preview_images),
-      })),
-    );
+    const next: ImportListRow[] = data.map((row) => ({
+      id: row.id,
+      batch_name: row.batch_name,
+      status: row.status,
+      webhook_url: row.webhook_url,
+      created_at: row.created_at,
+      image_count: coerceImageCount(row.image_count),
+      preview_images: parsePreviewImagesJson(row.preview_images),
+      succeeded_count: coerceImageCount(
+        (row as Record<string, unknown>).succeeded_count,
+      ),
+      failed_count: coerceImageCount(
+        (row as Record<string, unknown>).failed_count,
+      ),
+      pending_count: coerceImageCount(
+        (row as Record<string, unknown>).pending_count,
+      ),
+      uploading_count: coerceImageCount(
+        (row as Record<string, unknown>).uploading_count,
+      ),
+    }));
+    setImports(next);
+    importsRef.current = next;
   }, [importBrandId]);
 
   useEffect(() => {
     fetchImports();
   }, [fetchImports]);
+
+  // Poll while any import is actively running so the UI shows live progress without a
+  // page reload. Stops polling automatically once everything settles.
+  useEffect(() => {
+    const hasActive = imports.some((i) => ACTIVE_STATUSES.has(i.status));
+    if (!hasActive) return;
+    const t = setInterval(() => {
+      void fetchImports();
+    }, ACTIVE_POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [imports, fetchImports]);
 
   return (
     <div className="px-8 py-10">

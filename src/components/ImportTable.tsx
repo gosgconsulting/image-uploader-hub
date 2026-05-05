@@ -1,6 +1,13 @@
 import { memo, useCallback, useState } from "react";
 import { format } from "date-fns";
-import { Send, Eye, Loader2, Image as ImageIcon, Trash2 } from "lucide-react";
+import {
+  Send,
+  Eye,
+  Loader2,
+  Image as ImageIcon,
+  Trash2,
+  ListChecks,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -21,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ImagePreviewDialog } from "@/components/ImagePreviewDialog";
+import { ImportStatusModal } from "@/components/ImportStatusModal";
 import {
   SendApprovalDialog,
   type SendApprovalImport,
@@ -45,6 +53,10 @@ export interface ImportListRow {
   created_at: string;
   image_count: number;
   preview_images: ImportImage[];
+  succeeded_count?: number;
+  failed_count?: number;
+  pending_count?: number;
+  uploading_count?: number;
 }
 
 interface ImportTableProps {
@@ -59,8 +71,10 @@ const statusVariant: Record<
   "default" | "secondary" | "destructive" | "outline"
 > = {
   pending: "outline",
+  queued: "secondary",
   processing: "secondary",
   completed: "default",
+  partial: "secondary",
   failed: "destructive",
 };
 
@@ -71,6 +85,7 @@ type ImportTableRowProps = {
   onPreview: (imp: ImportListRow) => void;
   onSend: (imp: ImportListRow) => void;
   onDelete: (imp: ImportListRow) => void;
+  onShowStatus: (imp: ImportListRow) => void;
 };
 
 const ImportTableRow = memo(function ImportTableRow({
@@ -80,11 +95,18 @@ const ImportTableRow = memo(function ImportTableRow({
   onPreview,
   onSend,
   onDelete,
+  onShowStatus,
 }: ImportTableRowProps) {
   const isSending = sendingId === imp.id;
   const isDeleting = deletingId === imp.id;
-  const deleteDisabled =
-    deletingId !== null || isSending || imp.status === "processing";
+  // Allow retrying queued/processing rows: a stuck `processing` (worker timed out) and a
+  // `partial` (some images failed) should both be re-sendable. Only block during the
+  // synchronous handoff (when our own click is in flight).
+  const sendDisabled = isSending;
+  const deleteDisabled = deletingId !== null || isSending;
+  const isActive = imp.status === "queued" || imp.status === "processing";
+  const showStatusButton =
+    imp.status !== "pending" || (imp.succeeded_count ?? 0) + (imp.failed_count ?? 0) > 0;
 
   return (
     <TableRow>
@@ -130,12 +152,23 @@ const ImportTableRow = memo(function ImportTableRow({
         </div>
       </TableCell>
       <TableCell>
-        <Badge
-          variant={statusVariant[imp.status] || "outline"}
-          className="font-mono text-[10px] uppercase"
-        >
-          {imp.status}
-        </Badge>
+        <div className="flex flex-col gap-0.5">
+          <Badge
+            variant={statusVariant[imp.status] || "outline"}
+            className="font-mono text-[10px] uppercase w-fit"
+          >
+            {isActive && (
+              <Loader2 className="mr-1 h-2.5 w-2.5 animate-spin" />
+            )}
+            {imp.status}
+          </Badge>
+          {(imp.succeeded_count !== undefined || imp.failed_count !== undefined) &&
+            (imp.succeeded_count! + imp.failed_count! > 0) && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {imp.succeeded_count}✓ {imp.failed_count ? `${imp.failed_count}✗` : ""}
+              </span>
+            )}
+        </div>
       </TableCell>
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
@@ -145,15 +178,28 @@ const ImportTableRow = memo(function ImportTableRow({
             type="button"
             onClick={() => onPreview(imp)}
             disabled={imp.image_count === 0}
+            aria-label="Preview images"
           >
             <Eye className="h-3.5 w-3.5" />
           </Button>
+          {showStatusButton && (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => onShowStatus(imp)}
+              aria-label="View upload status"
+            >
+              <ListChecks className="h-3.5 w-3.5" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
             type="button"
             onClick={() => onSend(imp)}
-            disabled={isSending || imp.status === "processing"}
+            disabled={sendDisabled}
+            aria-label={isActive ? "Resend (currently active)" : "Send to Shopify"}
           >
             {isSending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -217,6 +263,7 @@ export function ImportTable({
   const [approvalImport, setApprovalImport] = useState<ImportListRow | null>(
     null,
   );
+  const [statusTarget, setStatusTarget] = useState<ImportListRow | null>(null);
   const { toast } = useToast();
 
   const openPreview = useCallback((imp: ImportListRow) => {
@@ -268,20 +315,15 @@ export function ImportTable({
 
     setSendingId(imp.id);
     try {
-      await supabase
-        .from("imports")
-        .update({ status: "processing" })
-        .eq("id", imp.id);
-
-      onStatusChange();
-
       type ImportNativeResponse = {
         success?: boolean;
+        accepted?: boolean;
         message?: string;
-        failed_product_id?: string;
+        pending?: number;
+        skipped_already_done?: number;
       };
 
-      let succeeded = false;
+      let nativeAccepted = false;
       let blockWebhookDup = false;
 
       if (trimmedBrand) {
@@ -297,6 +339,9 @@ export function ImportTable({
           const stale = expMs > 0 && expMs < Date.now() + 90_000;
           if (stale) await supabase.auth.refreshSession();
 
+          // The function now returns immediately after queueing — actual upload runs
+          // in the background. We do NOT mark the import completed here; the worker
+          // does that when it finishes. Polling on the list page surfaces progress.
           const { data, error } =
             await supabase.functions.invoke<ImportNativeResponse>(
               "shopify-import-media",
@@ -304,22 +349,20 @@ export function ImportTable({
                 body: {
                   brand_id: trimmedBrand,
                   import_id: imp.id,
-                  batch_name: imp.batch_name,
-                  timestamp: imp.created_at,
                   products,
                 },
               },
             );
 
-          if (!error && data?.success) {
-            await supabase
-              .from("imports")
-              .update({ status: "completed" })
-              .eq("id", imp.id);
-            succeeded = true;
+          if (!error && data?.accepted) {
+            nativeAccepted = true;
+            const pending = typeof data.pending === "number" ? data.pending : products.length;
+            const skipped = data.skipped_already_done ?? 0;
             toast({
-              title: "Images uploaded",
-              description: "Product media was added in Shopify.",
+              title: "Upload queued",
+              description: skipped > 0
+                ? `Uploading ${pending} image${pending === 1 ? "" : "s"} in background. ${skipped} already done.`
+                : `Uploading ${pending} image${pending === 1 ? "" : "s"} in background. Refreshes automatically.`,
             });
           } else if (!webhookTarget) {
             await supabase
@@ -377,7 +420,14 @@ export function ImportTable({
         }
       }
 
-      if (!succeeded && webhookTarget && !blockWebhookDup) {
+      if (!nativeAccepted && webhookTarget && !blockWebhookDup) {
+        // Webhook fallback path (no native brand creds): keep prior synchronous behavior.
+        await supabase
+          .from("imports")
+          .update({ status: "processing" })
+          .eq("id", imp.id);
+        onStatusChange();
+
         const response = await fetch(webhookTarget, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -408,7 +458,6 @@ export function ImportTable({
                 ? "Native upload unavailable; automation completed the run."
                 : "Import data sent. Check your automation tool for status.",
           });
-          succeeded = true;
         } else {
           await supabase
             .from("imports")
@@ -507,6 +556,7 @@ export function ImportTable({
                 onPreview={openPreview}
                 onSend={setApprovalImport}
                 onDelete={setDeleteTarget}
+                onShowStatus={setStatusTarget}
               />
             ))}
           </TableBody>
@@ -521,6 +571,16 @@ export function ImportTable({
         images={preview?.images || []}
         batchName={preview?.batchName || "Import"}
         loading={preview?.loading ?? false}
+      />
+
+      <ImportStatusModal
+        open={!!statusTarget}
+        onOpenChange={(open) => {
+          if (!open) setStatusTarget(null);
+        }}
+        importId={statusTarget?.id ?? null}
+        batchName={statusTarget?.batch_name || "Import"}
+        importStatus={statusTarget?.status || "pending"}
       />
 
       <SendApprovalDialog
