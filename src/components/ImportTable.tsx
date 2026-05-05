@@ -40,6 +40,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { deleteImportWithStorage } from "@/lib/delete-import";
+import { fetchAllImportImageRows } from "@/lib/fetch-all-import-images";
 import { useImportUploadProgress } from "@/lib/import-upload-queue";
 import { takeImportSnapshot } from "@/lib/shopify-import-snapshots";
 import { reorderImportMedia } from "@/lib/shopify-product-reorder";
@@ -375,16 +376,14 @@ export function ImportTable({
       loading: true,
     });
     void (async () => {
-      const { data, error } = await supabase
-        .from("shopify_import_images")
-        .select("id, file_name, file_url")
-        .eq("import_id", imp.id)
-        .order("created_at", { ascending: true });
-
-      if (error) {
+      const result = await fetchAllImportImageRows<ImportImage>(supabase, {
+        importId: imp.id,
+        select: "id, file_name, file_url",
+      });
+      if (!result.ok) {
         toast({
           title: "Could not load images",
-          description: error.message,
+          description: result.error,
           variant: "destructive",
         });
         setPreview(null);
@@ -392,7 +391,7 @@ export function ImportTable({
       }
       setPreview({
         batchName: imp.batch_name || "Import",
-        images: (data ?? []) as ImportImage[],
+        images: result.rows,
         loading: false,
       });
     })();

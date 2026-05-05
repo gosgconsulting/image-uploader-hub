@@ -117,7 +117,7 @@ async function handleInternalContinuation(opts: {
 
   console.log(
     `[shopify-import-media] continuation import=${importId} product=${result.productGid ?? "none"} ` +
-      `succeeded=${result.succeeded} failed=${result.failed} remaining=${result.remainingProducts} done=${result.done}`,
+      `succeeded=${result.succeeded} failed=${result.failed} skipped=${result.skipped} remaining=${result.remainingProducts} done=${result.done}`,
   );
 
   if (result.done) {
@@ -166,6 +166,7 @@ serve(async (req) => {
     brand_id?: string;
     import_id?: string;
     products?: unknown;
+    upload_mode?: string;
   };
 
   try {
@@ -249,12 +250,16 @@ serve(async (req) => {
     return json({ success: false, message: "No valid products to upload" }, 200);
   }
 
-  // Sync stage: queue the import + write per-image product mapping. The actual Shopify
-  // work happens in chained continuations so no single invocation has to outlive the
-  // runtime's wall-clock budget.
+  // Sync stage: queue the import + persist upload_mode + write per-image product mapping.
+  // upload_mode is stored on the imports row so each continuation can read it without
+  // the user having to re-pass it (the row is the source of truth for this run).
+  const requestedMode = typeof body.upload_mode === "string" ? body.upload_mode.trim() : "";
+  const uploadMode: "append" | "replace" =
+    requestedMode === "replace" ? "replace" : "append";
+
   await admin
     .from("shopify_imports")
-    .update({ status: "queued" })
+    .update({ status: "queued", upload_mode: uploadMode })
     .eq("id", importId);
 
   const prep = await prepareImportImages(admin, importId, productRows);

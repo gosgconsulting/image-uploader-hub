@@ -349,20 +349,26 @@ serve(async (req) => {
     return json({ error: "Invalid Shopify shop domain" }, 400);
   }
 
-  const { data: rows, error: rowsErr } = await admin
-    .from("shopify_import_images")
-    .select("shopify_product_id")
-    .eq("import_id", importId)
-    .not("shopify_product_id", "is", null);
-  if (rowsErr) return json({ error: rowsErr.message }, 500);
-
-  const productIds = Array.from(
-    new Set(
-      (rows ?? [])
-        .map((r) => (r as { shopify_product_id: string | null }).shopify_product_id)
-        .filter((v): v is string => typeof v === "string" && v.length > 0),
-    ),
-  );
+  // Paginate so a >1000-image import isn't truncated by the PostgREST cap —
+  // otherwise products whose rows fall past the cap wouldn't get reordered.
+  const PAGE = 1000;
+  const productIdSet = new Set<string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data: rows, error: rowsErr } = await admin
+      .from("shopify_import_images")
+      .select("shopify_product_id")
+      .eq("import_id", importId)
+      .not("shopify_product_id", "is", null)
+      .range(from, from + PAGE - 1);
+    if (rowsErr) return json({ error: rowsErr.message }, 500);
+    const batch = rows ?? [];
+    for (const r of batch) {
+      const v = (r as { shopify_product_id: string | null }).shopify_product_id;
+      if (typeof v === "string" && v.length > 0) productIdSet.add(v);
+    }
+    if (batch.length < PAGE) break;
+  }
+  const productIds = Array.from(productIdSet);
   if (productIds.length === 0) {
     return json({
       ok: true,

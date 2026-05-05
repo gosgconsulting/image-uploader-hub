@@ -10,6 +10,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -19,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllImportImageRows } from "@/lib/fetch-all-import-images";
 import { resolveShopifyAdminForMapping } from "@/lib/shopify-credentials";
 import { cn } from "@/lib/utils";
 import { mapImportImagesToShopifyProducts } from "@/utils/mapImportImagesToShopifyProducts";
@@ -68,11 +79,18 @@ interface MappedProduct {
   images: { file_name: string; file_url: string }[];
 }
 
+export type UploadMode = "append" | "replace";
+
 interface SendApprovalDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   imp: SendApprovalImport | null;
-  onApprove: (imp: SendApprovalImport, products: WebhookProduct[]) => void;
+  onApprove: (
+    imp: SendApprovalImport,
+    products: WebhookProduct[],
+    mode: UploadMode,
+    backup: boolean,
+  ) => void;
   isSending: boolean;
   onDataChange?: () => void;
   /** Used to load Shopify Admin credentials from Supabase when enabled. */
@@ -540,6 +558,8 @@ export function SendApprovalDialog({
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [featurePickerFor, setFeaturePickerFor] = useState<number | null>(null);
   const [galleryEditorFor, setGalleryEditorFor] = useState<number | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [backup, setBackup] = useState(true);
   const { toast } = useToast();
 
   const fetchMapData = useCallback(async () => {
@@ -547,14 +567,12 @@ export function SendApprovalDialog({
     setLoading(true);
     let images: ImportImage[] = [];
     try {
-      const { data: latestImages, error: imgErr } = await supabase
-        .from("shopify_import_images")
-        .select("id, file_name, file_url")
-        .eq("import_id", imp.id)
-        .order("created_at", { ascending: true });
-
-      if (imgErr) throw imgErr;
-      images = (latestImages ?? []) as ImportImage[];
+      const result = await fetchAllImportImageRows<ImportImage>(supabase, {
+        importId: imp.id,
+        select: "id, file_name, file_url",
+      });
+      if (!result.ok) throw new Error(result.error);
+      images = result.rows;
 
       const creds = await resolveShopifyAdminForMapping(brandId);
       if (!creds) {
@@ -741,9 +759,9 @@ export function SendApprovalDialog({
     });
   };
 
-  // ── Approve ────────────────────────────────────────────────────────────────
-  const handleApprove = () => {
-    const payload: WebhookProduct[] = editableProducts
+  // ── Send: build payload once, then user picks Replace vs Add ───────────────
+  const buildPayload = (): WebhookProduct[] =>
+    editableProducts
       .filter((_, i) => selectedRows.has(i))
       .flatMap((p) =>
         p.images.map(
@@ -763,7 +781,14 @@ export function SendApprovalDialog({
         ),
       );
 
-    onApprove(imp, payload);
+  const handleSendClick = () => {
+    if (selectedRows.size === 0) return;
+    setConfirmOpen(true);
+  };
+
+  const handleConfirm = (mode: UploadMode) => {
+    setConfirmOpen(false);
+    onApprove(imp, buildPayload(), mode, backup);
   };
 
   const galleryProduct =
@@ -948,6 +973,14 @@ export function SendApprovalDialog({
               <span className="text-xs text-muted-foreground font-mono">
                 {selectedRows.size} / {editableProducts.length} selected
               </span>
+              <label className="flex items-center gap-2 text-xs font-mono cursor-pointer select-none">
+                <Checkbox
+                  checked={backup}
+                  onCheckedChange={(v) => setBackup(v === true)}
+                  aria-label="Backup existing product media before sending"
+                />
+                <span>Backup existing media (rollback later)</span>
+              </label>
               {!loading && failedMappings.length > 0 && (
                 <Button
                   type="button"
@@ -970,7 +1003,7 @@ export function SendApprovalDialog({
               Cancel
             </Button>
             <Button
-              onClick={handleApprove}
+              onClick={handleSendClick}
               disabled={isSending || loading || selectedRows.size === 0}
             >
               {isSending ? (
@@ -979,13 +1012,43 @@ export function SendApprovalDialog({
                   Sending…
                 </>
               ) : (
-                `Approve & Send (${selectedRows.size})`
+                `Send (${selectedRows.size})`
               )}
             </Button>
             </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>How should these images land on Shopify?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-mono font-medium">Replace</span> deletes every
+              existing media on each product first, then uploads the {selectedRows.size}{" "}
+              selected image{selectedRows.size === 1 ? "" : "s"}. <br />
+              <span className="font-mono font-medium">Add new</span> keeps the existing
+              product media and just appends these.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => handleConfirm("append")}
+              className="bg-primary"
+            >
+              Add new
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => handleConfirm("replace")}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Replace
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <FailedMappingsDialog
         open={failedMappingsOpen}
