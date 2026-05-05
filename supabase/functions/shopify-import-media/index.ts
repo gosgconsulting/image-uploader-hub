@@ -194,7 +194,7 @@ serve(async (req) => {
     });
   }
 
-  // ── User-initiated kickoff path: validates the user's JWT. ──────────────────────
+  // ── User-initiated paths: validate the user's JWT. ──────────────────────────────
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return json({ success: false, message: "Missing authorization" }, 401);
@@ -203,7 +203,6 @@ serve(async (req) => {
 
   const brandId = typeof body.brand_id === "string" ? body.brand_id.trim() : "";
   const importId = typeof body.import_id === "string" ? body.import_id.trim() : "";
-  const productsRaw = body.products;
 
   const {
     data: { user },
@@ -225,6 +224,45 @@ serve(async (req) => {
     return json({ success: false, message: cred.error }, 200);
   }
 
+  // ── Resume action: re-queue an import that still has un-processed pending rows. ─
+  // Images already have shopify_product_id set from the original send; the
+  // continuation worker picks them up automatically. No products list needed.
+  if (body.action === "resume") {
+    // Count pending rows that are mapped and ready to process.
+    const PAGE = 1000;
+    let pendingCount = 0;
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows } = await admin
+        .from("shopify_import_images")
+        .select("id")
+        .eq("import_id", importId)
+        .eq("status", "pending")
+        .not("shopify_product_id", "is", null)
+        .range(from, from + PAGE - 1);
+      const batch = rows ?? [];
+      pendingCount += batch.length;
+      if (batch.length < PAGE) break;
+    }
+    if (pendingCount === 0) {
+      return json({ accepted: false, pending: 0, message: "No pending images to resume." });
+    }
+    // Re-queue: keep upload_mode as append (skip duplicates, preserve existing media).
+    await admin
+      .from("shopify_imports")
+      .update({ status: "queued", upload_mode: "append" })
+      .eq("id", importId);
+
+    const firstContinuation = scheduleContinuation({ supabaseUrl, serviceKey, importId });
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+      EdgeRuntime.waitUntil(firstContinuation);
+    } else {
+      void firstContinuation;
+    }
+    console.log(`[shopify-import-media] resume import=${importId} pending=${pendingCount}`);
+    return json({ accepted: true, pending: pendingCount });
+  }
+
+  const productsRaw = body.products;
   const rawArr = Array.isArray(productsRaw) ? productsRaw : [];
   const productRows: Array<ProductImageRow & { id: string }> = [];
   for (const el of rawArr) {

@@ -9,6 +9,7 @@ import {
   ListChecks,
   History,
   ArrowUpDown,
+  UploadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -91,27 +92,32 @@ type ImportTableRowProps = {
   imp: ImportListRow;
   sendingId: string | null;
   deletingId: string | null;
+  resumingId: string | null;
   onPreview: (imp: ImportListRow) => void;
   onSend: (imp: ImportListRow) => void;
   onDelete: (imp: ImportListRow) => void;
   onShowStatus: (imp: ImportListRow) => void;
   onRollback: (imp: ImportListRow) => void;
   onReorder: (imp: ImportListRow) => void;
+  onResumePending: (imp: ImportListRow) => void;
 };
 
 const ImportTableRow = memo(function ImportTableRow({
   imp,
   sendingId,
   deletingId,
+  resumingId,
   onPreview,
   onSend,
   onDelete,
   onShowStatus,
   onRollback,
   onReorder,
+  onResumePending,
 }: ImportTableRowProps) {
   const isSending = sendingId === imp.id;
   const isDeleting = deletingId === imp.id;
+  const isResuming = resumingId === imp.id;
   // Live progress from the in-browser upload queue (the file→storage step). This is
   // separate from `imp.status`, which tracks the Shopify-push step and is server-side.
   const uploadProgress = useImportUploadProgress(imp.id);
@@ -121,8 +127,8 @@ const ImportTableRow = memo(function ImportTableRow({
   // `partial` (some images failed) should both be re-sendable. Only block during the
   // synchronous handoff (when our own click is in flight) or while the local browser
   // queue is still pushing files for this import to storage.
-  const sendDisabled = isSending || uploadInFlight;
-  const deleteDisabled = deletingId !== null || isSending || uploadInFlight;
+  const sendDisabled = isSending || uploadInFlight || isResuming;
+  const deleteDisabled = deletingId !== null || isSending || uploadInFlight || isResuming;
   // Reorder relies on shopify_product_id rows that are populated by the send step,
   // so block until at least one image has succeeded on Shopify.
   const reorderDisabled =
@@ -253,6 +259,26 @@ const ImportTableRow = memo(function ImportTableRow({
               <Send className="h-3.5 w-3.5" />
             )}
           </Button>
+          {(imp.pending_count ?? 0) > 0 &&
+            imp.status !== "queued" &&
+            imp.status !== "processing" &&
+            (imp.succeeded_count ?? 0) + (imp.failed_count ?? 0) > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={() => onResumePending(imp)}
+                disabled={isResuming || isSending}
+                aria-label="Upload missing pending images"
+                title={`Upload ${imp.pending_count} pending image${imp.pending_count === 1 ? "" : "s"} that weren't processed yet`}
+              >
+                {isResuming ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <UploadCloud className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            )}
           <Button
             variant="ghost"
             size="sm"
@@ -311,6 +337,7 @@ export function ImportTable({
 }: ImportTableProps) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [resumingId, setResumingId] = useState<string | null>(null);
   const [reorderTarget, setReorderTarget] = useState<ImportListRow | null>(null);
   // Imports the user just sent. We watch for them to land in a terminal state
   // (completed/partial) and then auto-reorder so the gallery follows the
@@ -650,6 +677,41 @@ export function ImportTable({
     });
   }, [deleteTarget, onStatusChange, toast]);
 
+  const handleResumePending = useCallback(async (imp: ImportListRow) => {
+    const trimmedBrand = brandId?.trim() ?? "";
+    if (!trimmedBrand) {
+      toast({ title: "No brand selected", description: "Select a brand first.", variant: "destructive" });
+      return;
+    }
+    setResumingId(imp.id);
+    try {
+      const { data, error } = await supabase.functions.invoke<{
+        accepted?: boolean;
+        pending?: number;
+        message?: string;
+      }>("shopify-import-media", {
+        body: { action: "resume", brand_id: trimmedBrand, import_id: imp.id },
+      });
+      if (error || !data?.accepted) {
+        toast({
+          title: "Resume failed",
+          description: data?.message ?? error?.message ?? "Could not resume import.",
+          variant: "destructive",
+        });
+        return;
+      }
+      pendingAutoReorderRef.current.add(imp.id);
+      const pending = data.pending ?? 0;
+      toast({
+        title: "Resuming upload",
+        description: `Uploading ${pending} pending image${pending === 1 ? "" : "s"} in background. Refreshes automatically.`,
+      });
+      onStatusChange();
+    } finally {
+      setResumingId(null);
+    }
+  }, [brandId, onStatusChange, toast]);
+
   if (imports.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
@@ -690,12 +752,14 @@ export function ImportTable({
                 imp={imp}
                 sendingId={sendingId}
                 deletingId={deletingId}
+                resumingId={resumingId}
                 onPreview={openPreview}
                 onSend={setApprovalImport}
                 onDelete={setDeleteTarget}
                 onShowStatus={setStatusTarget}
                 onRollback={setRollbackTarget}
                 onReorder={setReorderTarget}
+                onResumePending={handleResumePending}
               />
             ))}
           </TableBody>
