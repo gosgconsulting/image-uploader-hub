@@ -16,18 +16,24 @@ export async function fetchAllImportImageRows<T = unknown>(
     /** Defaults to ordering by created_at ascending — match the original UX. */
     orderBy?: { column: string; ascending: boolean };
     pageSize?: number;
+    /** When set, only rows whose status is in this list are returned. */
+    statusFilter?: string[];
   },
 ): Promise<{ ok: true; rows: T[] } | { ok: false; error: string }> {
   const order = opts.orderBy ?? { column: "created_at", ascending: true };
   const PAGE = opts.pageSize ?? 1000;
   const all: T[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
+    let q = supabase
       .from("shopify_import_images")
       .select(opts.select)
       .eq("import_id", opts.importId)
       .order(order.column, { ascending: order.ascending })
       .range(from, from + PAGE - 1);
+    if (opts.statusFilter && opts.statusFilter.length > 0) {
+      q = q.in("status", opts.statusFilter);
+    }
+    const { data, error } = await q;
     if (error) return { ok: false, error: error.message };
     const batch = (data ?? []) as T[];
     all.push(...batch);

@@ -94,6 +94,7 @@ type ImportTableRowProps = {
   deletingId: string | null;
   onPreview: (imp: ImportListRow) => void;
   onSend: (imp: ImportListRow) => void;
+  onResumePending: (imp: ImportListRow) => void;
   onDelete: (imp: ImportListRow) => void;
   onShowStatus: (imp: ImportListRow) => void;
   onRollback: (imp: ImportListRow) => void;
@@ -106,6 +107,7 @@ const ImportTableRow = memo(function ImportTableRow({
   deletingId,
   onPreview,
   onSend,
+  onResumePending,
   onDelete,
   onShowStatus,
   onRollback,
@@ -262,7 +264,7 @@ const ImportTableRow = memo(function ImportTableRow({
                 variant="ghost"
                 size="sm"
                 type="button"
-                onClick={() => onSend(imp)}
+                onClick={() => onResumePending(imp)}
                 disabled={sendDisabled}
                 aria-label="Upload missing pending images"
                 title={`Upload ${imp.pending_count} pending image${imp.pending_count === 1 ? "" : "s"} that weren't processed yet`}
@@ -339,9 +341,8 @@ export function ImportTable({
     images: ImportImage[];
     loading: boolean;
   } | null>(null);
-  const [approvalImport, setApprovalImport] = useState<ImportListRow | null>(
-    null,
-  );
+  const [approvalImport, setApprovalImport] = useState<ImportListRow | null>(null);
+  const [resumeImport, setResumeImport] = useState<ImportListRow | null>(null);
   const [statusTarget, setStatusTarget] = useState<ImportListRow | null>(null);
   const [rollbackTarget, setRollbackTarget] = useState<ImportListRow | null>(null);
   const { toast } = useToast();
@@ -709,6 +710,7 @@ export function ImportTable({
                 deletingId={deletingId}
                 onPreview={openPreview}
                 onSend={setApprovalImport}
+                onResumePending={setResumeImport}
                 onDelete={setDeleteTarget}
                 onShowStatus={setStatusTarget}
                 onRollback={setRollbackTarget}
@@ -753,6 +755,22 @@ export function ImportTable({
         isSending={sendingId === approvalImport?.id}
         onDataChange={onStatusChange}
         brandId={brandId}
+      />
+
+      <SendApprovalDialog
+        open={!!resumeImport}
+        onOpenChange={(open) => {
+          if (!open) setResumeImport(null);
+        }}
+        imp={resumeImport}
+        onApprove={(imp, products, mode, backup) => {
+          setResumeImport(null);
+          handleTriggerWebhook(imp, products, mode, backup);
+        }}
+        isSending={sendingId === resumeImport?.id}
+        onDataChange={onStatusChange}
+        brandId={brandId}
+        statusFilter={["pending"]}
       />
 
       <RollbackDialog

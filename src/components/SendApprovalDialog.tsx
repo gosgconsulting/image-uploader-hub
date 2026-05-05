@@ -95,6 +95,8 @@ interface SendApprovalDialogProps {
   onDataChange?: () => void;
   /** Used to load Shopify Admin credentials from Supabase when enabled. */
   brandId?: string | null;
+  /** When set, only image rows with these statuses are fetched. Used for resume-pending flow. */
+  statusFilter?: string[];
 }
 
 // ─── Upload helper ─────────────────────────────────────────────────────────────
@@ -549,6 +551,7 @@ export function SendApprovalDialog({
   isSending,
   onDataChange,
   brandId = null,
+  statusFilter,
 }: SendApprovalDialogProps) {
   const [loading, setLoading] = useState(false);
   const [rawProducts, setRawProducts] = useState<WebhookProduct[]>([]);
@@ -570,6 +573,7 @@ export function SendApprovalDialog({
       const result = await fetchAllImportImageRows<ImportImage>(supabase, {
         importId: imp.id,
         select: "id, file_name, file_url",
+        statusFilter,
       });
       if (!result.ok) throw new Error(result.error);
       images = result.rows;
@@ -655,7 +659,7 @@ export function SendApprovalDialog({
     } finally {
       setLoading(false);
     }
-  }, [imp, onDataChange, toast, brandId]);
+  }, [imp, onDataChange, toast, brandId, statusFilter]);
 
   // Reset only when the import itself changes, not on every close
   useEffect(() => {
@@ -800,7 +804,9 @@ export function SendApprovalDialog({
         <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="font-mono text-sm">
-              Review & Send — {imp.batch_name || "Untitled"}
+              {statusFilter?.length
+                ? `Resume pending — ${imp.batch_name || "Untitled"}`
+                : `Review & Send — ${imp.batch_name || "Untitled"}`}
             </DialogTitle>
           </DialogHeader>
 
