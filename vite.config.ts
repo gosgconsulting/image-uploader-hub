@@ -107,7 +107,9 @@ function shopifyAdminProxy(): Plugin {
 export default defineConfig({
   server: {
     host: "::",
-    port: 8080,
+    // Honor PORT env var so the harness can assign one when 8080 is in use; fall back
+    // to 8080 for plain `pnpm dev`.
+    port: Number(process.env.PORT) || 8080,
     hmr: {
       overlay: false,
     },

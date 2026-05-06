@@ -46,6 +46,21 @@ interface ImportStatusModalProps {
   brandId?: string | null;
 }
 
+interface ReorderSummary {
+  processed?: number;
+  moved?: number;
+  variants_pinned?: number;
+  failed?: number;
+  errors?: Array<{ product_id?: string; error?: string }>;
+}
+
+interface ImportRowMeta {
+  reorder_status: string | null;
+  reorder_summary: ReorderSummary | null;
+  reorder_started_at: string | null;
+  reorder_completed_at: string | null;
+}
+
 const STATUS_META: Record<
   string,
   { label: string; tone: string; Icon: React.ComponentType<{ className?: string }> }
@@ -54,7 +69,9 @@ const STATUS_META: Record<
   uploading: { label: "UPLOADING", tone: "text-blue-500", Icon: Loader2 },
   succeeded: { label: "SUCCEEDED", tone: "text-emerald-600", Icon: CheckCircle2 },
   failed: { label: "FAILED", tone: "text-destructive", Icon: XCircle },
-  skipped: { label: "SKIPPED", tone: "text-muted-foreground", Icon: Clock },
+  // "Skipped from upload" — the reorder pass still resequences this image's
+  // product, so it's not skipped end-to-end.
+  skipped: { label: "ON PRODUCT", tone: "text-muted-foreground", Icon: Clock },
 };
 
 function StatusPill({ status }: { status: string }) {
@@ -65,6 +82,145 @@ function StatusPill({ status }: { status: string }) {
       <Icon className={`h-3 w-3 ${status === "uploading" ? "animate-spin" : ""}`} />
       {meta.label}
     </span>
+  );
+}
+
+type PhaseState = "pending" | "running" | "done" | "failed" | "skipped";
+
+function PhaseRow({
+  state,
+  label,
+  detail,
+}: {
+  state: PhaseState;
+  label: string;
+  detail?: React.ReactNode;
+}) {
+  const Icon =
+    state === "done"
+      ? CheckCircle2
+      : state === "failed"
+        ? XCircle
+        : state === "running"
+          ? Loader2
+          : Circle;
+  const tone =
+    state === "done"
+      ? "text-emerald-600"
+      : state === "failed"
+        ? "text-destructive"
+        : state === "running"
+          ? "text-blue-500"
+          : state === "skipped"
+            ? "text-muted-foreground line-through"
+            : "text-muted-foreground";
+  return (
+    <li className="flex items-start gap-2">
+      <Icon
+        className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${tone} ${state === "running" ? "animate-spin" : ""}`}
+      />
+      <div className="min-w-0">
+        <span className={`font-mono text-xs ${tone}`}>{label}</span>
+        {detail !== undefined && (
+          <span className="ml-2 font-mono text-[11px] text-muted-foreground">
+            {detail}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function PhaseChecklist({
+  importStatus,
+  counts,
+  reorder,
+}: {
+  importStatus: string;
+  counts: { total: number; succeeded: number; failed: number; skipped: number; pending: number };
+  reorder: ImportRowMeta | null;
+}) {
+  // Phase 1 — Queued. Always reaches "done" the moment any row exists.
+  const queueState: PhaseState = counts.total > 0 ? "done" : "pending";
+
+  // Phase 2 — Upload pass. Active while import is queued/processing; reaches
+  // "done" when status flips to completed/partial; "failed" if the whole
+  // import failed.
+  let uploadState: PhaseState;
+  if (importStatus === "failed") uploadState = "failed";
+  else if (importStatus === "completed" || importStatus === "partial")
+    uploadState = "done";
+  else if (importStatus === "queued" || importStatus === "processing")
+    uploadState = "running";
+  else uploadState = "pending";
+
+  // Phase 3 — Variant-color reorder. We use the reorder_status column when
+  // available, otherwise infer from import status (compat with pre-migration
+  // databases — the reorder is fired the moment upload finalizes).
+  let reorderState: PhaseState = "pending";
+  if (reorder?.reorder_status === "completed") reorderState = "done";
+  else if (reorder?.reorder_status === "failed") reorderState = "failed";
+  else if (reorder?.reorder_status === "running") reorderState = "running";
+  else if (reorder?.reorder_status === "skipped") reorderState = "skipped";
+  else if (importStatus === "failed") reorderState = "skipped";
+  else if (uploadState === "running") reorderState = "pending";
+  else if (uploadState === "done") reorderState = "running"; // fallback when no column
+  else reorderState = "pending";
+
+  const uploadDetail = (
+    <>
+      {counts.succeeded} uploaded · {counts.skipped} already on product
+      {counts.failed > 0 && ` · ${counts.failed} failed`}
+      {counts.pending > 0 && ` · ${counts.pending} pending`}
+    </>
+  );
+
+  let reorderDetail: React.ReactNode = null;
+  const sum = reorder?.reorder_summary;
+  if (reorderState === "done" && sum) {
+    reorderDetail = (
+      <>
+        {sum.processed ?? 0} products · {sum.moved ?? 0} images moved ·{" "}
+        {sum.variants_pinned ?? 0} variant images pinned
+        {sum.failed && sum.failed > 0 ? ` · ${sum.failed} failed` : ""}
+      </>
+    );
+  } else if (reorderState === "running") {
+    reorderDetail = (
+      <>Re-sorting every product's media by variant color (skipped images
+        are still part of the reorder)</>
+    );
+  } else if (reorderState === "failed" && sum) {
+    reorderDetail = <>{sum.failed ?? 0} of {sum.processed ?? 0} products errored</>;
+  } else if (reorderState === "skipped") {
+    reorderDetail = <>Upload didn't produce anything to reorder</>;
+  } else {
+    reorderDetail = <>Runs automatically once upload finishes</>;
+  }
+
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2">
+      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">
+        Pipeline
+      </p>
+      <ul className="space-y-1">
+        <PhaseRow
+          state={queueState}
+          label="Queued"
+          detail={counts.total > 0 ? `${counts.total} images` : "—"}
+        />
+        <PhaseRow
+          state={uploadState}
+          label="Upload to Shopify"
+          detail={counts.total > 0 ? uploadDetail : "—"}
+        />
+        <PhaseRow
+          state={reorderState}
+          label="Variant-color reorder"
+          detail={reorderDetail}
+        />
+      </ul>
+    </div>
   );
 }
 
@@ -94,6 +250,7 @@ export function ImportStatusModal({
   const [loading, setLoading] = useState(false);
   const [shopifyMedia, setShopifyMedia] = useState<ShopifyProductMediaMap>({});
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [importMeta, setImportMeta] = useState<ImportRowMeta | null>(null);
 
   const fetchRows = async (id: string) => {
     setLoading(true);
@@ -111,22 +268,58 @@ export function ImportStatusModal({
     setRows(result.rows);
   };
 
+  /**
+   * Fetch the import row's reorder columns. Wrapped in try/catch and a column-
+   * specific fallback so a pre-migration database (where these columns don't
+   * exist yet) doesn't break the modal — we just hide the reorder phase.
+   */
+  const fetchImportMeta = async (id: string) => {
+    const tryFetch = async () => {
+      const { data, error } = await supabase
+        .from("shopify_imports")
+        .select(
+          "reorder_status, reorder_summary, reorder_started_at, reorder_completed_at",
+        )
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as ImportRowMeta | null;
+    };
+    try {
+      const meta = await tryFetch();
+      setImportMeta(meta);
+    } catch {
+      setImportMeta(null);
+    }
+  };
+
   useEffect(() => {
-    if (open && importId) void fetchRows(importId);
+    if (open && importId) {
+      void fetchRows(importId);
+      void fetchImportMeta(importId);
+    }
     if (!open) {
       setRows([]);
       setShopifyMedia({});
+      setImportMeta(null);
     }
   }, [open, importId]);
 
-  // Auto-refresh while the import is still active.
+  // Auto-refresh while the import OR its reorder pass is still active.
   useEffect(() => {
     if (!open || !importId) return;
-    const active = importStatus === "queued" || importStatus === "processing";
-    if (!active) return;
-    const t = setInterval(() => void fetchRows(importId), 3000);
+    const uploadActive =
+      importStatus === "queued" || importStatus === "processing";
+    const reorderActive =
+      importMeta?.reorder_status === "running" ||
+      importMeta?.reorder_status === "pending";
+    if (!uploadActive && !reorderActive) return;
+    const t = setInterval(() => {
+      void fetchRows(importId);
+      void fetchImportMeta(importId);
+    }, 3000);
     return () => clearInterval(t);
-  }, [open, importId, importStatus]);
+  }, [open, importId, importStatus, importMeta?.reorder_status]);
 
   // After rows load, fetch existing Shopify media for any mapped products.
   const productIdsKey = useMemo(
@@ -190,6 +383,18 @@ export function ImportStatusModal({
           </DialogTitle>
         </DialogHeader>
 
+        <PhaseChecklist
+          importStatus={importStatus}
+          counts={{
+            total: counts.total,
+            succeeded: counts.succeeded,
+            failed: counts.failed,
+            skipped: counts.skipped,
+            pending: counts.pending + counts.uploading,
+          }}
+          reorder={importMeta}
+        />
+
         <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-muted-foreground">
           <span>{counts.total} total</span>
           <span className="text-emerald-600">✓ {counts.succeeded}</span>
@@ -197,8 +402,8 @@ export function ImportStatusModal({
           {counts.uploading > 0 && <span className="text-blue-500">↑ {counts.uploading}</span>}
           {counts.pending > 0 && <span>… {counts.pending}</span>}
           {counts.skipped > 0 && (
-            <span title="Filename already on the product — skipped to avoid duplicates">
-              = {counts.skipped} already on product
+            <span title="Filename already on the product — skipped from upload, but the variant-color reorder still applies to it.">
+              = {counts.skipped} already on product (still reordered)
             </span>
           )}
           {mediaLoading && (
@@ -212,7 +417,11 @@ export function ImportStatusModal({
             size="sm"
             type="button"
             className="ml-auto h-7"
-            onClick={() => importId && void fetchRows(importId)}
+            onClick={() => {
+              if (!importId) return;
+              void fetchRows(importId);
+              void fetchImportMeta(importId);
+            }}
             disabled={loading}
           >
             <RefreshCw className={`h-3.5 w-3.5 mr-1 ${loading ? "animate-spin" : ""}`} />

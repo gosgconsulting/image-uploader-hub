@@ -5,12 +5,38 @@ export type ReorderMedia = {
   alt: string | null;
   url: string | null;
   position: number;
+  /** Color matched to the product's color option (Color/Couleur), null if unknown. */
+  color?: string | null;
 };
 
 export type ReorderResult = {
   product_id: string;
   title?: string | null;
   moved: number;
+  /** The Shopify option name treated as color, null when the product has none. */
+  color_option?: string | null;
+  /** "named" if Shopify's option was Color/Couleur/etc; "auto" if picked by score. */
+  color_option_source?: "named" | "auto" | null;
+  /** Color values in variant order — drives the grouping shown in the preview. */
+  color_values?: string[] | null;
+  /** Variant.image pins applied (apply mode) or planned (dry run). */
+  variants_updated?: number;
+  variant_updates_planned?: number;
+  /**
+   * Per-variant gallery associations: how many media-variant attachments were
+   * appended (so each color variant only shows its own images on the storefront)
+   * and how many wrong-color attachments were detached.
+   */
+  variant_media_appended?: number;
+  variant_media_appends_planned?: number;
+  variant_media_detached?: number;
+  variant_media_detaches_planned?: number;
+  /**
+   * How many duplicate media items will be (or were) deleted from the product
+   * to clean up filename collisions left over from prior re-imports.
+   */
+  media_deleted?: number;
+  media_deletions_planned?: number;
   error?: string;
   current?: ReorderMedia[];
   proposed?: ReorderMedia[];

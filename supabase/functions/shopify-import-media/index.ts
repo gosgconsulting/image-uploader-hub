@@ -65,6 +65,45 @@ function scheduleContinuation(opts: {
     });
 }
 
+/**
+ * Fire-and-forget call to the variant-aware reorder function once an import finishes.
+ * Runs as the same internal trust level as our continuation chain (service-role header).
+ * Failures are logged but never propagate to the user — the import already succeeded.
+ */
+function scheduleAutoReorder(opts: {
+  supabaseUrl: string;
+  serviceKey: string;
+  brandId: string;
+  importId: string;
+}): Promise<void> {
+  const url = `${opts.supabaseUrl}/functions/v1/shopify-product-media-reorder`;
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      [INTERNAL_HEADER]: opts.serviceKey,
+      Authorization: `Bearer ${opts.serviceKey}`,
+    },
+    body: JSON.stringify({
+      brand_id: opts.brandId,
+      import_id: opts.importId,
+      dry_run: false,
+    }),
+  })
+    .then(async (r) => {
+      const text = await r.text().catch(() => "");
+      console.log(
+        `[shopify-import-media] auto-reorder kicked off import=${opts.importId} status=${r.status} body=${text.slice(0, 300)}`,
+      );
+    })
+    .catch((e) => {
+      console.error(
+        `[shopify-import-media] auto-reorder fetch failed import=${opts.importId}`,
+        e,
+      );
+    });
+}
+
 async function handleInternalContinuation(opts: {
   admin: SupabaseClient;
   importId: string;
@@ -125,6 +164,53 @@ async function handleInternalContinuation(opts: {
     console.log(
       `[shopify-import-media] finalized import=${importId} status=${finalStatus}`,
     );
+
+    // Auto-trigger variant-aware reorder for completed AND partial imports — the
+    // images that DID succeed (or were skipped because they're already on the
+    // product) should still be regrouped by color so the storefront is correct.
+    // Failed imports skip this (nothing usable to reorder yet).
+    if (finalStatus !== "failed") {
+      // Mark reorder as running so the UI can show the checklist phase. The
+      // reorder function flips this to "completed" / "failed" itself. Wrapped
+      // in try/catch so the column-missing case (pre-migration) doesn't break
+      // the import flow.
+      try {
+        await admin
+          .from("shopify_imports")
+          .update({
+            reorder_status: "running",
+            reorder_started_at: new Date().toISOString(),
+          })
+          .eq("id", importId);
+      } catch (e) {
+        console.warn(
+          `[shopify-import-media] could not mark reorder running: ${e instanceof Error ? e.message : e}`,
+        );
+      }
+
+      const reorder = scheduleAutoReorder({
+        supabaseUrl,
+        serviceKey,
+        brandId: imp.brand_id,
+        importId,
+      });
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+        EdgeRuntime.waitUntil(reorder);
+      } else {
+        void reorder;
+      }
+    } else {
+      // Upload failed entirely — there's nothing to reorder.
+      try {
+        await admin
+          .from("shopify_imports")
+          .update({ reorder_status: "skipped" })
+          .eq("id", importId);
+      } catch {
+        /* column missing — pre-migration */
+      }
+    }
+
     return json({ ok: true, done: true, status: finalStatus });
   }
 
@@ -291,6 +377,15 @@ serve(async (req) => {
   // Sync stage: queue the import + persist upload_mode + write per-image product mapping.
   // upload_mode is stored on the imports row so each continuation can read it without
   // the user having to re-pass it (the row is the source of truth for this run).
+  //
+  // Modes (neither deletes Shopify media):
+  //   - "append"  → continue from where the last send left off; only process rows that
+  //                 haven't already succeeded. Dedup-by-filename against live Shopify
+  //                 state still applies.
+  //   - "replace" → restart the whole import: reset every row (incl. previously-
+  //                 succeeded ones) to pending, then run the same dedup-by-filename
+  //                 upload. Useful when Shopify state drifted from local status (e.g.
+  //                 partial imports, manual edits) and you want a clean reconciliation.
   const requestedMode = typeof body.upload_mode === "string" ? body.upload_mode.trim() : "";
   const uploadMode: "append" | "replace" =
     requestedMode === "replace" ? "replace" : "append";
@@ -300,7 +395,9 @@ serve(async (req) => {
     .update({ status: "queued", upload_mode: uploadMode })
     .eq("id", importId);
 
-  const prep = await prepareImportImages(admin, importId, productRows);
+  const prep = await prepareImportImages(admin, importId, productRows, {
+    restart: uploadMode === "replace",
+  });
 
   // Kick off the first continuation. waitUntil ensures the fetch makes it out before the
   // worker shuts down.

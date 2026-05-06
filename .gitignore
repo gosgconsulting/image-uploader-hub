@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .dyad/
+
+# Claude Code per-user settings (shared launch.json is fine to commit)
+.claude/settings.local.json

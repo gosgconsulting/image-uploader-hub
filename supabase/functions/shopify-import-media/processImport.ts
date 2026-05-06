@@ -23,29 +23,7 @@ const ADD_PRODUCT_MEDIA = `mutation AddProductImages($productId: ID!, $media: [C
   }
 }`;
 
-// Replace-mode helpers: list every media id on a product, then delete them. Pagination
-// is bounded by Shopify's 250-per-page; we drain the cursor before issuing one batched
-// delete. We intentionally do NOT delete in chunks during pagination — collecting all ids
-// first means a partial network failure leaves the product mostly intact instead of
-// half-deleted.
-const LIST_PRODUCT_MEDIA_PAGE = `query ListProductMedia($id: ID!, $cursor: String) {
-  product(id: $id) {
-    id
-    media(first: 250, after: $cursor) {
-      pageInfo { hasNextPage endCursor }
-      nodes { id }
-    }
-  }
-}`;
-
-const DELETE_PRODUCT_MEDIA = `mutation DeleteProductMedia($productId: ID!, $mediaIds: [ID!]!) {
-  productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
-    deletedMediaIds
-    mediaUserErrors { field message }
-  }
-}`;
-
-// For append-mode dedup: pull every existing media on a product with enough info
+// For dedup: pull every existing media on a product with enough info
 // (alt + image URL) that we can recognize an incoming filename as already there.
 const LIST_PRODUCT_MEDIA_DETAIL = `query ListProductMediaDetail($id: ID!, $cursor: String) {
   product(id: $id) {
@@ -62,6 +40,20 @@ const LIST_PRODUCT_MEDIA_DETAIL = `query ListProductMediaDetail($id: ID!, $curso
 }`;
 
 /**
+ * Normalize a filename for case-insensitive matching: lowercase, trimmed, and
+ * percent-decoded (Shopify CDN URLs encode non-ASCII characters).
+ */
+function normalizeFilename(name: string): string {
+  let n = name.trim();
+  try {
+    n = decodeURIComponent(n);
+  } catch {
+    /* leave as-is if it isn't valid percent-encoding */
+  }
+  return n.toLowerCase();
+}
+
+/**
  * Reduce an existing-media descriptor down to a normalized filename key suitable
  * for matching against an incoming upload. Tries the alt text first (we set alt
  * to "<productName> - <filename>" on upload), falls back to the storage URL's
@@ -76,25 +68,27 @@ function existingMediaKey(node: {
   if (node.alt) {
     const parts = node.alt.split(" - ");
     const last = parts[parts.length - 1].trim();
-    if (/\.[A-Za-z0-9]+$/.test(last)) return last.toLowerCase();
+    if (/\.[A-Za-z0-9]+$/.test(last)) return normalizeFilename(last);
   }
   if (node.image?.url) {
     const filename = node.image.url.split("/").pop()?.split("?")[0];
-    if (filename) return filename.toLowerCase();
+    if (filename) return normalizeFilename(filename);
   }
   return null;
 }
 
 /**
- * Fetch the current set of filename keys already on a product. Used by
- * append-mode to skip duplicates so re-uploading the same drop doesn't double
- * the gallery; the user still gets a reorder pass over the result.
+ * Fetch the current set of existing media on a product as a `filename → media_id`
+ * map. Used by both append and replace (= restart) modes to skip duplicates so
+ * re-uploading the same drop doesn't double the gallery — the auto-reorder pass
+ * runs afterwards regardless. Recording the matching `media_id` back onto the
+ * skipped row lets the rollback flow target the right Shopify media later.
  */
-async function fetchExistingFilenameKeys(
+async function fetchExistingFilenameMap(
   shopHost: string,
   accessToken: string,
   productId: string,
-): Promise<{ ok: true; keys: Set<string> } | { ok: false; error: string }> {
+): Promise<{ ok: true; map: Map<string, string> } | { ok: false; error: string }> {
   const gqlUrl = `https://${shopHost}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
   const headers = {
     "X-Shopify-Access-Token": accessToken,
@@ -102,7 +96,7 @@ async function fetchExistingFilenameKeys(
     "Content-Type": "application/json",
   } as const;
 
-  const keys = new Set<string>();
+  const map = new Map<string, string>();
   let cursor: string | null = null;
   for (;;) {
     let raw: {
@@ -139,12 +133,98 @@ async function fetchExistingFilenameKeys(
         alt: n.alt ?? null,
         image: n.image?.url ? { url: n.image.url } : null,
       });
-      if (key) keys.add(key);
+      if (key && n.id && !map.has(key)) map.set(key, n.id);
     }
     if (!page?.pageInfo?.hasNextPage || !page.pageInfo.endCursor) break;
     cursor = page.pageInfo.endCursor;
   }
-  return { ok: true, keys };
+  return { ok: true, map };
+}
+
+/**
+ * Replace-mode wipe: delete every product media whose normalized filename is
+ * NOT in the import's expected set. This gives "Restart from scratch" true
+ * end-state-equals-imported-set semantics, so stale photos from prior runs
+ * (including wrong-color images that linger and leak into the wrong variant
+ * gallery on themes that fall back to product.media when variant.media is
+ * empty) get cleaned up before we re-upload.
+ *
+ * Errors are returned, never thrown — the caller logs and continues so a
+ * single product's wipe failure doesn't abort the whole import.
+ */
+const DELETE_PRODUCT_MEDIA = `mutation DeleteProductMedia($productId: ID!, $mediaIds: [ID!]!) {
+  productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
+    deletedMediaIds
+    mediaUserErrors { field message }
+  }
+}`;
+
+async function wipeNonImportedProductMedia(
+  shopHost: string,
+  accessToken: string,
+  productId: string,
+  expectedFilenames: Set<string>,
+): Promise<{ deleted: number; error?: string }> {
+  const existing = await fetchExistingFilenameMap(
+    shopHost,
+    accessToken,
+    productId,
+  );
+  if (!existing.ok) return { deleted: 0, error: existing.error };
+
+  const toDelete: string[] = [];
+  for (const [fname, mediaId] of existing.map) {
+    if (!expectedFilenames.has(fname)) toDelete.push(mediaId);
+  }
+  if (toDelete.length === 0) return { deleted: 0 };
+
+  const gqlUrl = `https://${shopHost}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+  const headers = {
+    "X-Shopify-Access-Token": accessToken,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  } as const;
+
+  const CHUNK = 100;
+  let deleted = 0;
+  for (let i = 0; i < toDelete.length; i += CHUNK) {
+    const mediaIds = toDelete.slice(i, i + CHUNK);
+    let raw: {
+      errors?: Array<{ message?: string }>;
+      data?: {
+        productDeleteMedia?: {
+          deletedMediaIds?: string[] | null;
+          mediaUserErrors?: Array<{ message?: string }>;
+        };
+      };
+    };
+    try {
+      const r = await fetch(gqlUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          query: DELETE_PRODUCT_MEDIA,
+          variables: { productId, mediaIds },
+        }),
+      });
+      raw = await r.json();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      return { deleted, error: msg };
+    }
+    if (raw.errors?.length) {
+      return { deleted, error: raw.errors[0]?.message || "GraphQL error" };
+    }
+    const userErrors = raw.data?.productDeleteMedia?.mediaUserErrors ?? [];
+    if (userErrors.length) {
+      return {
+        deleted,
+        error: userErrors[0]?.message || "Shopify rejected delete",
+      };
+    }
+    deleted += raw.data?.productDeleteMedia?.deletedMediaIds?.length ?? 0;
+  }
+  return { deleted };
 }
 
 interface BatchInput {
@@ -171,118 +251,6 @@ type GqlResponse = {
     };
   };
 };
-
-async function deleteAllExistingMedia(
-  shopHost: string,
-  accessToken: string,
-  productId: string,
-): Promise<{ ok: true; deletedCount: number } | { ok: false; error: string }> {
-  const gqlUrl = `https://${shopHost}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
-  const headers = {
-    "X-Shopify-Access-Token": accessToken,
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  } as const;
-
-  const allMediaIds: string[] = [];
-  let cursor: string | null = null;
-
-  // Paginate through every existing media on the product.
-  for (;;) {
-    let raw: {
-      errors?: unknown;
-      data?: {
-        product?: {
-          media?: {
-            pageInfo?: { hasNextPage?: boolean; endCursor?: string };
-            nodes?: Array<{ id?: string }>;
-          };
-        };
-      };
-    };
-    try {
-      const r = await fetch(gqlUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          query: LIST_PRODUCT_MEDIA_PAGE,
-          variables: { id: productId, cursor },
-        }),
-      });
-      raw = await r.json();
-      if (!r.ok) {
-        return { ok: false, error: `Shopify HTTP ${r.status}` };
-      }
-    } catch (e) {
-      return {
-        ok: false,
-        error: e instanceof Error ? e.message : "Network error listing media",
-      };
-    }
-
-    if (Array.isArray(raw.errors) && raw.errors.length > 0) {
-      return { ok: false, error: `GraphQL: ${JSON.stringify(raw.errors)}` };
-    }
-
-    const nodes = raw.data?.product?.media?.nodes ?? [];
-    for (const n of nodes) if (typeof n.id === "string") allMediaIds.push(n.id);
-
-    const next = raw.data?.product?.media?.pageInfo;
-    if (!next?.hasNextPage || !next.endCursor) break;
-    cursor = next.endCursor;
-  }
-
-  if (allMediaIds.length === 0) return { ok: true, deletedCount: 0 };
-
-  // Shopify accepts up to 100 media ids per delete; chunk to be safe.
-  const DELETE_CHUNK = 100;
-  let deletedCount = 0;
-  for (let i = 0; i < allMediaIds.length; i += DELETE_CHUNK) {
-    const chunk = allMediaIds.slice(i, i + DELETE_CHUNK);
-    let raw: {
-      errors?: unknown;
-      data?: {
-        productDeleteMedia?: {
-          deletedMediaIds?: string[];
-          mediaUserErrors?: Array<{ field?: string[] | null; message?: string }>;
-        };
-      };
-    };
-    try {
-      const r = await fetch(gqlUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          query: DELETE_PRODUCT_MEDIA,
-          variables: { productId, mediaIds: chunk },
-        }),
-      });
-      raw = await r.json();
-      if (!r.ok) {
-        return { ok: false, error: `Shopify delete HTTP ${r.status}` };
-      }
-    } catch (e) {
-      return {
-        ok: false,
-        error: e instanceof Error ? e.message : "Network error deleting media",
-      };
-    }
-
-    if (Array.isArray(raw.errors) && raw.errors.length > 0) {
-      return { ok: false, error: `GraphQL: ${JSON.stringify(raw.errors)}` };
-    }
-    const userErrors = raw.data?.productDeleteMedia?.mediaUserErrors ?? [];
-    if (userErrors.length > 0) {
-      return {
-        ok: false,
-        error: userErrors[0]?.message ?? JSON.stringify(userErrors),
-      };
-    }
-    deletedCount += raw.data?.productDeleteMedia?.deletedMediaIds?.length ?? 0;
-  }
-
-  return { ok: true, deletedCount };
-}
 
 async function postShopifyBatch(
   shopHost: string,
@@ -342,21 +310,31 @@ export async function prepareImportImages(
   admin: SupabaseClient,
   importId: string,
   productRows: Array<ProductImageRow & { id: string }>,
+  options?: { restart?: boolean },
 ): Promise<{ pendingCount: number; skippedAlreadyDoneCount: number }> {
-  // Fetch all already-succeeded row IDs for this import with pagination — using
-  // `.in("id", [...])` would silently cap at 1000 rows for large imports.
-  const succeededIds = new Set<string>();
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data: rows } = await admin
-      .from("shopify_import_images")
-      .select("id")
-      .eq("import_id", importId)
-      .eq("status", "succeeded")
-      .range(from, from + PAGE - 1);
-    const batch = (rows ?? []) as Array<{ id: string }>;
-    for (const r of batch) succeededIds.add(r.id);
-    if (batch.length < PAGE) break;
+  const restart = options?.restart === true;
+
+  // Restart mode: re-process every row regardless of prior status. Skip-vs-upload
+  // is then decided per-image by the dedup pass against the live Shopify state,
+  // so already-uploaded images are detected as "already on product" rather than
+  // being assumed-done from a stale local status.
+  let succeededIds: Set<string>;
+  if (restart) {
+    succeededIds = new Set();
+  } else {
+    succeededIds = new Set<string>();
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows } = await admin
+        .from("shopify_import_images")
+        .select("id")
+        .eq("import_id", importId)
+        .eq("status", "succeeded")
+        .range(from, from + PAGE - 1);
+      const batch = (rows ?? []) as Array<{ id: string }>;
+      for (const r of batch) succeededIds.add(r.id);
+      if (batch.length < PAGE) break;
+    }
   }
 
   let pendingCount = 0;
@@ -369,17 +347,18 @@ export async function prepareImportImages(
         return;
       }
       pendingCount += 1;
-      await admin
-        .from("shopify_import_images")
-        .update({
-          status: "pending",
-          shopify_product_id: p.productid,
-          shopify_product_name: p.productname ?? null,
-          error_message: null,
-          started_at: null,
-          completed_at: null,
-        })
-        .eq("id", p.id);
+      // On restart, also clear shopify_media_id — the dedup pass will re-link
+      // the row to the matching live media, or upload + record a fresh id.
+      const update: Record<string, unknown> = {
+        status: "pending",
+        shopify_product_id: p.productid,
+        shopify_product_name: p.productname ?? null,
+        error_message: null,
+        started_at: null,
+        completed_at: null,
+      };
+      if (restart) update.shopify_media_id = null;
+      await admin.from("shopify_import_images").update(update).eq("id", p.id);
     }),
   );
 
@@ -389,6 +368,15 @@ export async function prepareImportImages(
 /**
  * Process all images for a single Shopify product (in 20-image Shopify batches). Updates
  * each `import_images` row's status as it goes. Returns the per-image outcome counts.
+ *
+ * Append mode: never deletes existing Shopify media; the dedup pass just skips
+ * filenames already on the product.
+ *
+ * Replace mode ("Restart from scratch"): wipes every product media whose
+ * filename isn't in this import before the dedup pass runs, so any stale media
+ * from a prior run is cleared and the post-import auto-reorder rebuilds clean
+ * variant galleries. Upstream, `prepareImportImages` already reset every row to
+ * `pending` for replace.
  */
 async function processOneProduct(
   admin: SupabaseClient,
@@ -398,28 +386,6 @@ async function processOneProduct(
   rows: ImportImageRow[],
   uploadMode: "append" | "replace",
 ): Promise<{ succeeded: number; failed: number; skipped: number }> {
-  // Replace mode: nuke every existing media on the product BEFORE we start uploading
-  // new ones. We do this once per product (the caller drives one product per
-  // continuation), so even on the very first batch the product is already empty.
-  if (uploadMode === "replace") {
-    const del = await deleteAllExistingMedia(shopDomain, accessToken, productGid);
-    if (!del.ok) {
-      // Mark every image we were going to upload as failed for this product so the
-      // overall import status reflects the problem and the user can retry.
-      const errMsg = `Replace failed: ${del.error}`.slice(0, 1000);
-      const completedAt = new Date().toISOString();
-      await admin
-        .from("shopify_import_images")
-        .update({
-          status: "failed",
-          error_message: errMsg,
-          completed_at: completedAt,
-        })
-        .in("id", rows.map((r) => r.id));
-      return { succeeded: 0, failed: rows.length, skipped: 0 };
-    }
-  }
-
   // Sort by filename order using the same heuristic the original synchronous flow used
   // (e.g. `REF-1-front.jpg` before `REF-2-front.jpg`). Using the existing helper avoids
   // duplicating the sort logic.
@@ -445,35 +411,75 @@ async function processOneProduct(
   let failed = 0;
   let skipped = 0;
 
-  // Append mode: skip filenames that already exist on the product. The auto-reorder
-  // pass that runs after import completion will still resequence the gallery, so a
-  // re-upload of the same drop ends up correctly ordered without duplicating media.
-  if (uploadMode === "append" && orderedWithIds.length > 0) {
-    const existing = await fetchExistingFilenameKeys(
+  // Replace mode: wipe non-imported media before the dedup pass so old/wrong
+  // images can't survive. Idempotent — same import set ⇒ same delete decisions.
+  if (uploadMode === "replace" && orderedWithIds.length > 0) {
+    const expected = new Set<string>();
+    for (const r of orderedWithIds) {
+      const fname = normalizeFilename(r.original_file_name || r.file_name || "");
+      if (fname) expected.add(fname);
+    }
+    if (expected.size > 0) {
+      const wipe = await wipeNonImportedProductMedia(
+        shopDomain,
+        accessToken,
+        productGid,
+        expected,
+      );
+      if (wipe.error) {
+        console.warn(
+          `[shopify-import-media] product=${productGid} wipe error: ${wipe.error}`,
+        );
+      } else if (wipe.deleted > 0) {
+        console.log(
+          `[shopify-import-media] product=${productGid} wiped ${wipe.deleted} non-imported media`,
+        );
+      }
+    }
+  }
+
+  // Dedup pass: skip filenames already on the product. The auto-reorder pass that
+  // runs after import completion still resequences the gallery, so re-running an
+  // import lands correctly without duplicating media. We also record the matched
+  // media_id back onto the skipped row so rollback can target it later.
+  if (orderedWithIds.length > 0) {
+    const existing = await fetchExistingFilenameMap(
       shopDomain,
       accessToken,
       productGid,
     );
-    if (existing.ok && existing.keys.size > 0) {
-      const toSkip: typeof orderedWithIds = [];
+    if (existing.ok && existing.map.size > 0) {
+      const toSkip: Array<(typeof orderedWithIds)[number] & { mediaId: string }> = [];
       const toUpload: typeof orderedWithIds = [];
       for (const r of orderedWithIds) {
-        const fname = (r.original_file_name || r.file_name || "").toLowerCase();
-        if (fname && existing.keys.has(fname)) toSkip.push(r);
+        const fname = normalizeFilename(
+          r.original_file_name || r.file_name || "",
+        );
+        const matchId = fname ? existing.map.get(fname) : undefined;
+        if (matchId) toSkip.push({ ...r, mediaId: matchId });
         else toUpload.push(r);
       }
       if (toSkip.length > 0) {
         const completedAt = new Date().toISOString();
-        await admin
-          .from("shopify_import_images")
-          .update({
-            status: "skipped",
-            error_message: null,
-            completed_at: completedAt,
-            started_at: completedAt,
-          })
-          .in("id", toSkip.map((r) => r.id));
+        // Update each skipped row individually so we can write the matched media_id.
+        await Promise.all(
+          toSkip.map((r) =>
+            admin
+              .from("shopify_import_images")
+              .update({
+                status: "skipped",
+                shopify_media_id: r.mediaId,
+                error_message: "Already on product (filename matched)",
+                completed_at: completedAt,
+                started_at: completedAt,
+              })
+              .eq("id", r.id),
+          ),
+        );
         skipped = toSkip.length;
+        console.log(
+          `[shopify-import-media] product=${productGid} dedup skipped=${skipped} (already on product)`,
+        );
       }
       orderedWithIds = toUpload;
     }

@@ -9,6 +9,8 @@ import {
   ListChecks,
   History,
   ArrowUpDown,
+  Minimize2,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +33,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ImagePreviewDialog } from "@/components/ImagePreviewDialog";
 import { ImportStatusModal } from "@/components/ImportStatusModal";
+import { CompressImagesDialog } from "@/components/CompressImagesDialog";
+import { DeduplicateDialog } from "@/components/DeduplicateDialog";
 import {
   SendApprovalDialog,
   type SendApprovalImport,
@@ -97,6 +101,8 @@ type ImportTableRowProps = {
   onShowStatus: (imp: ImportListRow) => void;
   onRollback: (imp: ImportListRow) => void;
   onReorder: (imp: ImportListRow) => void;
+  onCompress: (imp: ImportListRow) => void;
+  onDedup: (imp: ImportListRow) => void;
 };
 
 const ImportTableRow = memo(function ImportTableRow({
@@ -109,6 +115,8 @@ const ImportTableRow = memo(function ImportTableRow({
   onShowStatus,
   onRollback,
   onReorder,
+  onCompress,
+  onDedup,
 }: ImportTableRowProps) {
   const isSending = sendingId === imp.id;
   const isDeleting = deletingId === imp.id;
@@ -268,6 +276,34 @@ const ImportTableRow = memo(function ImportTableRow({
             variant="ghost"
             size="sm"
             type="button"
+            onClick={() => onCompress(imp)}
+            disabled={imp.image_count === 0 || uploadInFlight}
+            aria-label="Compress oversized images"
+            title="Compress oversized images (Shopify ≤25 MB)"
+          >
+            <Minimize2 className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() => onDedup(imp)}
+            disabled={
+              uploadInFlight ||
+              imp.status === "pending" ||
+              imp.status === "queued" ||
+              imp.status === "processing" ||
+              imp.image_count === 0
+            }
+            aria-label="Deduplicate misattributed images"
+            title="Deduplicate misattributed images on Shopify (AI-assisted)"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
             onClick={() => onDelete(imp)}
             disabled={deleteDisabled}
             aria-label="Delete import"
@@ -325,6 +361,8 @@ export function ImportTable({
   const [approvalImport, setApprovalImport] = useState<ImportListRow | null>(null);
   const [statusTarget, setStatusTarget] = useState<ImportListRow | null>(null);
   const [rollbackTarget, setRollbackTarget] = useState<ImportListRow | null>(null);
+  const [compressTarget, setCompressTarget] = useState<ImportListRow | null>(null);
+  const [dedupTarget, setDedupTarget] = useState<ImportListRow | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -694,6 +732,8 @@ export function ImportTable({
                 onShowStatus={setStatusTarget}
                 onRollback={setRollbackTarget}
                 onReorder={setReorderTarget}
+                onCompress={setCompressTarget}
+                onDedup={setDedupTarget}
               />
             ))}
           </TableBody>
@@ -744,6 +784,27 @@ export function ImportTable({
         importId={rollbackTarget?.id ?? null}
         batchName={rollbackTarget?.batch_name ?? null}
         brandId={brandId}
+      />
+
+      <CompressImagesDialog
+        open={!!compressTarget}
+        onOpenChange={(open) => {
+          if (!open) setCompressTarget(null);
+        }}
+        importId={compressTarget?.id ?? null}
+        batchName={compressTarget?.batch_name ?? null}
+        onCompleted={onStatusChange}
+      />
+
+      <DeduplicateDialog
+        open={!!dedupTarget}
+        onOpenChange={(open) => {
+          if (!open) setDedupTarget(null);
+        }}
+        importId={dedupTarget?.id ?? null}
+        batchName={dedupTarget?.batch_name ?? null}
+        brandId={brandId}
+        onApplied={onStatusChange}
       />
 
       <ReorderPreviewDialog

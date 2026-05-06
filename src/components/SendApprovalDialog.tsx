@@ -30,6 +30,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllImportImageRows } from "@/lib/fetch-all-import-images";
+import { resizeImageForShopify } from "@/lib/image-resize";
 import { resolveShopifyAdminForMapping } from "@/lib/shopify-credentials";
 import { cn } from "@/lib/utils";
 import { mapImportImagesToShopifyProducts } from "@/utils/mapImportImagesToShopifyProducts";
@@ -104,12 +105,19 @@ async function uploadImageToSupabase(
   brandId: string,
   file: File,
 ): Promise<{ file_name: string; file_url: string }> {
-  const safeName = `${Date.now()}_${file.name}`;
+  // Compress before upload so Shopify's 25 MB media limit can't be tripped by
+  // raw DSLR JPEGs. resizeImageForShopify is a no-op for already-small JPEGs.
+  const resized = await resizeImageForShopify(file).catch(() => null);
+  const finalFile = resized?.file ?? file;
+
+  const safeName = `${Date.now()}_${finalFile.name}`;
   const filePath = `${importId}/${safeName}`;
 
   const { error: uploadError } = await supabase.storage
     .from("shopify-import-images")
-    .upload(filePath, file);
+    .upload(filePath, finalFile, {
+      contentType: finalFile.type || undefined,
+    });
 
   if (uploadError) throw uploadError;
 
@@ -123,12 +131,12 @@ async function uploadImageToSupabase(
   await supabase.from("shopify_import_images").insert({
     import_id: importId,
     brand_id: brandId,
-    file_name: file.name,
+    file_name: finalFile.name,
     file_url: urlData.publicUrl,
-    file_size: file.size,
+    file_size: finalFile.size,
   });
 
-  return { file_name: file.name, file_url: urlData.publicUrl };
+  return { file_name: finalFile.name, file_url: urlData.publicUrl };
 }
 
 // ─── Upload zone (reusable) ────────────────────────────────────────────────────
@@ -1024,12 +1032,32 @@ export function SendApprovalDialog({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>How should these images land on Shopify?</AlertDialogTitle>
-            <AlertDialogDescription>
-              <span className="font-mono font-medium">Replace</span> deletes every
-              existing media on each product first, then uploads the {selectedRows.size}{" "}
-              selected image{selectedRows.size === 1 ? "" : "s"}. <br />
-              <span className="font-mono font-medium">Add new</span> keeps the existing
-              product media and just appends these.
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  <span className="font-mono font-medium">Add new</span> — continues
+                  the previous send: only processes rows that haven't succeeded yet.
+                  Files already on the Shopify product (matched by filename,
+                  case-insensitive) are marked{" "}
+                  <span className="font-mono">skipped</span>.
+                </p>
+                <p>
+                  <span className="font-mono font-medium">Replace</span> — restarts
+                  the whole import from scratch and{" "}
+                  <strong>
+                    deletes any media on each affected Shopify product whose
+                    filename isn't in this import
+                  </strong>
+                  . Then re-uploads whatever is missing for the{" "}
+                  {selectedRows.size} selected image
+                  {selectedRows.size === 1 ? "" : "s"}. Backups (if you took one)
+                  are unaffected, and products outside this import are untouched.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Either way, the variant-color reorder runs after upload so each
+                  variant's featured image stays pinned to the right color.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">
@@ -1042,9 +1070,9 @@ export function SendApprovalDialog({
             </AlertDialogAction>
             <AlertDialogAction
               onClick={() => handleConfirm("replace")}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
             >
-              Replace
+              Restart from scratch
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
