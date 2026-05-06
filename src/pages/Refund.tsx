@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, useOutletContext } from "react-router-dom";
 import { DollarSign, Plus, Loader2 } from "lucide-react";
 import { RefundTable } from "@/components/RefundTable";
 import { RefundImportDialog } from "@/components/RefundImportDialog";
@@ -11,6 +11,7 @@ import { useShopifyConnection } from "@/components/ShopifyConnectionProvider";
 import { useRefundRecords } from "@/pages/refund/useRefundRecords";
 import { useRefundBulkSelection } from "@/pages/refund/useRefundBulkSelection";
 import { RefundPagination } from "@/pages/refund/RefundPagination";
+import type { DashboardOutletContext } from "@/types/dashboardOutletContext";
 
 const AUTH_REFUND = "/auth?next=%2Frefund";
 const REFUND_PAGE_SIZE = 20;
@@ -21,6 +22,7 @@ export default function Refund() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [refundListPage, setRefundListPage] = useState(1);
   const [searchParams] = useSearchParams();
+  const { importBrandId } = useOutletContext<DashboardOutletContext>();
 
   const {
     shopifyShop,
@@ -50,7 +52,7 @@ export default function Refund() {
     dateSort,
     setDateSort,
     handleClearFilters,
-  } = useRefundRecords(shopifyShop, shopifyToken, shopifyConnectionId);
+  } = useRefundRecords(shopifyShop, shopifyToken, shopifyConnectionId, importBrandId);
 
   const refundTotalCount = filteredAndSortedRefunds.length;
   const refundTotalPages = Math.max(1, Math.ceil(refundTotalCount / REFUND_PAGE_SIZE));

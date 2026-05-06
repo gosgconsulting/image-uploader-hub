@@ -7001,6 +7001,7 @@ export type Database = {
       refunds: {
         Row: {
           ai_confidence: number
+          brand_id: string | null
           calculated_refund: number
           created_at: string
           customer: string
@@ -7032,6 +7033,7 @@ export type Database = {
         }
         Insert: {
           ai_confidence?: number
+          brand_id?: string | null
           calculated_refund?: number
           created_at?: string
           customer?: string
@@ -7063,6 +7065,7 @@ export type Database = {
         }
         Update: {
           ai_confidence?: number
+          brand_id?: string | null
           calculated_refund?: number
           created_at?: string
           customer?: string
@@ -7093,6 +7096,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "refunds_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "refunds_shopify_credential_id_fkey"
             columns: ["shopify_credential_id"]
@@ -9282,6 +9292,56 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "shopify_metadata_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shopify_products: {
+        Row: {
+          brand_id: string
+          handle: string | null
+          image_url: string | null
+          product_type: string | null
+          shopify_product_id: string
+          shopify_updated_at: string | null
+          status: string | null
+          synced_at: string
+          title: string
+          variant_count: number
+          vendor: string | null
+        }
+        Insert: {
+          brand_id: string
+          handle?: string | null
+          image_url?: string | null
+          product_type?: string | null
+          shopify_product_id: string
+          shopify_updated_at?: string | null
+          status?: string | null
+          synced_at?: string
+          title: string
+          variant_count?: number
+          vendor?: string | null
+        }
+        Update: {
+          brand_id?: string
+          handle?: string | null
+          image_url?: string | null
+          product_type?: string | null
+          shopify_product_id?: string
+          shopify_updated_at?: string | null
+          status?: string | null
+          synced_at?: string
+          title?: string
+          variant_count?: number
+          vendor?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopify_products_brand_id_fkey"
             columns: ["brand_id"]
             isOneToOne: false
             referencedRelation: "brands"
@@ -14511,5 +14571,3 @@ export const Constants = {
     },
   },
 } as const
-A new version of Supabase CLI is available: v2.98.1 (currently installed v2.78.1)
-We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli

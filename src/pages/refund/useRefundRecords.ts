@@ -35,7 +35,8 @@ function needsShopifyEnrichment(r: Refund): boolean {
 export function useRefundRecords(
   shopifyShop: string,
   shopifyToken: string,
-  shopifyCredentialId: string
+  shopifyCredentialId: string,
+  brandId: string | null
 ) {
   const [refunds, setRefunds] = useState<Refund[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -48,7 +49,10 @@ export function useRefundRecords(
   const loadRefunds = useCallback(async () => {
     setIsLoadingList(true);
     setLoadError(null);
-    const { data, error } = await fetchRefunds(shopifyCredentialId.trim() || null);
+    const { data, error } = await fetchRefunds(
+      shopifyCredentialId.trim() || null,
+      brandId
+    );
     setIsLoadingList(false);
     if (error) {
       setLoadError(error.message);
@@ -60,7 +64,7 @@ export function useRefundRecords(
       return;
     }
     setRefunds(data);
-  }, [toast, shopifyCredentialId]);
+  }, [toast, shopifyCredentialId, brandId]);
 
   useEffect(() => {
     void loadRefunds();
@@ -153,6 +157,7 @@ export function useRefundRecords(
       const { error } = await insertRefunds(rows, {
         shopifyCredentialId: shopifyCredentialId.trim(),
         shopDomain: shopifyShop.trim(),
+        brandId,
       });
       if (error) {
         toast({
@@ -165,7 +170,7 @@ export function useRefundRecords(
       setRefunds((prev) => [...rows, ...prev]);
       void enrichImportedRefunds(rows);
     },
-    [enrichImportedRefunds, toast, shopifyCredentialId, shopifyShop]
+    [enrichImportedRefunds, toast, shopifyCredentialId, shopifyShop, brandId]
   );
 
   const filteredAndSortedRefunds = useMemo(() => {

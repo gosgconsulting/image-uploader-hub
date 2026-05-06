@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./components/DashboardLayout";
 import ImageUpload from "./pages/ImageUpload";
 import Refund from "./pages/Refund";
+import Products from "./pages/Products";
 import ShopifyConnectionSettings from "./pages/ShopifyConnectionSettings";
 import Users from "./pages/Users";
 import Auth from "./pages/Auth";
@@ -22,7 +23,8 @@ const App = () => (
         <Routes>
           {/* Dashboard routes — protected by DashboardLayout auth guard */}
           <Route element={<DashboardLayout />}>
-            <Route path="/" element={<Navigate to="/image-upload" replace />} />
+            <Route path="/" element={<Navigate to="/products" replace />} />
+            <Route path="/products" element={<Products />} />
             <Route path="/image-upload" element={<ImageUpload />} />
             <Route path="/refund" element={<Refund />} />
             <Route path="/shopify-settings" element={<ShopifyConnectionSettings />} />

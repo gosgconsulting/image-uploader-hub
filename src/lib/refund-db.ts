@@ -69,7 +69,7 @@ export function rowToRefund(row: Tables<"refunds">): Refund {
 
 export function refundToInsert(
   r: Refund,
-  scope: { shopifyCredentialId: string; shopDomain: string }
+  scope: { shopifyCredentialId: string; shopDomain: string; brandId: string | null }
 ): RefundRow {
   return {
     id: r.id,
@@ -98,6 +98,7 @@ export function refundToInsert(
     shopify_refund_attempted_at: r.shopifyRefundAttemptedAt ?? null,
     shopify_credential_id: scope.shopifyCredentialId,
     shop_domain: scope.shopDomain,
+    brand_id: scope.brandId,
   };
 }
 
@@ -149,17 +150,31 @@ function partialToUpdate(updates: Partial<Refund>): TablesUpdate<"refunds"> {
 }
 
 export async function fetchRefunds(
-  shopifyCredentialId: string | null
+  shopifyCredentialId: string | null,
+  brandId: string | null = null
 ): Promise<{ data: Refund[]; error: Error | null }> {
-  const id = shopifyCredentialId?.trim() ?? "";
-  if (!id) {
-    return { data: [], error: null };
+  const credId = shopifyCredentialId?.trim() ?? "";
+  const brand = brandId?.trim() ?? "";
+
+  // Brand picked: scope by brand_id directly so credential rotation doesn't orphan rows.
+  if (brand) {
+    const { data, error } = await supabase
+      .from("refunds")
+      .select("*")
+      .eq("brand_id", brand)
+      .is("deleted_at", null)
+      .order("date", { ascending: false });
+    if (error) return { data: [], error: new Error(error.message) };
+    return { data: (data ?? []).map((row) => rowToRefund(row)), error: null };
   }
+
+  // Legacy fallback: filter by credential when no brand context is available.
+  if (!credId) return { data: [], error: null };
 
   const { data, error } = await supabase
     .from("refunds")
     .select("*")
-    .eq("shopify_credential_id", id)
+    .eq("shopify_credential_id", credId)
     .is("deleted_at", null)
     .order("date", { ascending: false });
 
@@ -174,11 +189,12 @@ export async function fetchRefunds(
 
 export async function insertRefunds(
   rows: Refund[],
-  scope: { shopifyCredentialId: string; shopDomain: string }
+  scope: { shopifyCredentialId: string; shopDomain: string; brandId: string | null }
 ): Promise<{ error: Error | null }> {
   if (rows.length === 0) return { error: null };
   const credId = scope.shopifyCredentialId.trim();
   const shop = normalizeShopDomain(scope.shopDomain);
+  const brandId = scope.brandId?.trim() || null;
   if (!credId) {
     return {
       error: new Error(
@@ -191,7 +207,9 @@ export async function insertRefunds(
       error: new Error("Configure your Shopify shop domain before importing refunds."),
     };
   }
-  const payload = rows.map((r) => refundToInsert(r, { shopifyCredentialId: credId, shopDomain: shop }));
+  const payload = rows.map((r) =>
+    refundToInsert(r, { shopifyCredentialId: credId, shopDomain: shop, brandId })
+  );
   const { error } = await supabase.from("refunds").insert(payload);
   return { error: error ? new Error(error.message) : null };
 }

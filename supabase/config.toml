@@ -12,6 +12,10 @@ verify_jwt = false
 [functions.shopify-import-media]
 verify_jwt = false
 
+# Caller JWT verified in-function via resolveRefundAccessToken; service role used for upserts.
+[functions.shopify-products-sync]
+verify_jwt = false
+
 # Shopify redirects here without a Supabase JWT; we validate HMAC + state server-side.
 [functions.shopify-oauth]
 verify_jwt = false

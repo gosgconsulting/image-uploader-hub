@@ -4,7 +4,8 @@ import type { DashboardOutletContext } from "@/types/dashboardOutletContext";
 import {
   DollarSign,
   Package,
-  Store,
+  ShoppingBag,
+  KeyRound,
   LogOut,
   ChevronsUpDown,
   Check,
@@ -44,12 +45,13 @@ import { ShopifyConnectionProvider } from "@/components/ShopifyConnectionProvide
 import { useDashboardBrands } from "@/hooks/useDashboardBrands";
 
 const coreNavItems = [
-  { label: "Image Upload", to: "/image-upload", icon: Package },
-  { label: "Refund", to: "/refund", icon: DollarSign },
+  { label: "Products", to: "/products", icon: ShoppingBag },
+  { label: "Refunds", to: "/refund", icon: DollarSign },
+  { label: "Image Import", to: "/image-upload", icon: Package },
 ];
 
 const ownerNavItems = [
-  { label: "Shopify", to: "/shopify-settings", icon: Store },
+  { label: "API", to: "/shopify-settings", icon: KeyRound },
   { label: "Users", to: "/users", icon: Users },
 ];
 
