@@ -515,7 +515,24 @@ async function processOneProduct(
         chunk.map((c) => c.id),
       );
 
-    const batchResult = await postShopifyBatch(shopDomain, accessToken, productGid, inputs);
+    // Retry on transient errors (THROTTLED rate-limit, network blips, 5xx).
+    // Shopify's leaky bucket replenishes at ~50 cost/sec — 1.5s backoff is
+    // enough for a single batch to clear without blowing the function timeout.
+    const TRANSIENT_RE = /throttl|rate.limit|timeout|temporarily|network|5\d\d\b/i;
+    const MAX_ATTEMPTS = 4;
+    let batchResult = await postShopifyBatch(shopDomain, accessToken, productGid, inputs);
+    for (
+      let attempt = 1;
+      !batchResult.ok && attempt < MAX_ATTEMPTS && TRANSIENT_RE.test(batchResult.error);
+      attempt += 1
+    ) {
+      const delayMs = 1500 * attempt;
+      console.warn(
+        `[shopify-import-media] product=${productGid} transient error (attempt ${attempt}/${MAX_ATTEMPTS - 1}), backing off ${delayMs}ms: ${batchResult.error.slice(0, 200)}`,
+      );
+      await new Promise((r) => setTimeout(r, delayMs));
+      batchResult = await postShopifyBatch(shopDomain, accessToken, productGid, inputs);
+    }
     const completedAt = new Date().toISOString();
 
     if (!batchResult.ok) {
