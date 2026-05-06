@@ -48,14 +48,27 @@ function stripExtension(fileName: string): string {
 }
 
 /**
- * First token of the filename stem when split on hyphens or whitespace
- * (e.g. `REF-color-1.jpg` → `REF`, `REF front.jpg` → `REF`).
+ * Pick the most likely reference-parent token from a filename. We split the
+ * stem on `_`, `-`, and whitespace and prefer the first token that looks like
+ * a SKU (letters AND digits, ≥4 chars). This handles descriptive prefixes
+ * like `non retouché HS26 CHC26361-CREME-1.jpg` → `HS26` (or `CHC26361`),
+ * not `non` which never matches.
+ *
+ * Falls back to the first token when nothing looks SKU-shaped, so simple
+ * patterns like `REF-1.jpg` → `REF` still work.
  */
-function referenceParentFromFileName(fileName: string): string {
+export function referenceParentFromFileName(fileName: string): string {
   const stem = stripExtension(fileName);
   if (!stem) return "";
-  const first = stem.split(/[\s-]+/)[0]?.trim() ?? "";
-  return first;
+  const tokens = stem
+    .split(/[\s_-]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) return "";
+  const skuLike = tokens.find(
+    (t) => t.length >= 4 && /[A-Za-z]/.test(t) && /\d/.test(t),
+  );
+  return skuLike ?? tokens[0];
 }
 
 const SHOPIFY_FETCH_CONCURRENCY = 8;
@@ -90,11 +103,13 @@ export async function mapImportImagesToShopifyProducts(
   adminAccessToken: string,
   images: ImportImageRow[],
   brandId: string | null,
+  options?: { bypassCache?: boolean },
 ): Promise<{
   filtered: ImageMapProductRow[];
   grouped: ImageMapGroupedProduct[];
   failed: ImageMapFailedRow[];
 }> {
+  const bypassCache = options?.bypassCache === true;
   const filtered: ImageMapProductRow[] = [];
   const failed: ImageMapFailedRow[] = [];
 
@@ -112,7 +127,7 @@ export async function mapImportImagesToShopifyProducts(
   const memoryCache = new Map<string, FetchRefResult>();
   const now = Date.now();
 
-  if (brandId?.trim()) {
+  if (brandId?.trim() && !bypassCache) {
     try {
       const rows = await loadReferenceProductCacheRows(brandId, refsInOrder);
       const rowByRef = new Map(rows.map((r) => [r.reference_parent, r]));

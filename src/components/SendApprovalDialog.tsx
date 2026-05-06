@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Loader2, Pencil, X, Upload, AlertTriangle } from "lucide-react";
+import { Loader2, Pencil, X, Upload, AlertTriangle, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -33,7 +33,10 @@ import { fetchAllImportImageRows } from "@/lib/fetch-all-import-images";
 import { resizeImageForShopify } from "@/lib/image-resize";
 import { resolveShopifyAdminForMapping } from "@/lib/shopify-credentials";
 import { cn } from "@/lib/utils";
-import { mapImportImagesToShopifyProducts } from "@/utils/mapImportImagesToShopifyProducts";
+import {
+  mapImportImagesToShopifyProducts,
+  referenceParentFromFileName,
+} from "@/utils/mapImportImagesToShopifyProducts";
 import {
   VirtualImageGrid,
   useGalleryPickerGridColumns,
@@ -489,6 +492,12 @@ function FailedMappingsDialog({
                 </th>
                 <th
                   scope="col"
+                  className="h-10 px-3 text-left align-middle font-medium text-muted-foreground font-mono text-[10px] uppercase tracking-wider bg-background min-w-[100px]"
+                >
+                  Parsed ref
+                </th>
+                <th
+                  scope="col"
                   className="h-10 px-3 text-left align-middle font-medium text-muted-foreground font-mono text-[10px] uppercase tracking-wider bg-background min-w-[160px]"
                 >
                   Reason
@@ -525,6 +534,23 @@ function FailedMappingsDialog({
                   <td className="p-2 align-middle text-xs font-mono max-w-[200px]">
                     <span className="line-clamp-2 break-all" title={row.file_name}>
                       {row.file_name || "—"}
+                    </span>
+                  </td>
+                  <td className="p-2 align-middle text-xs font-mono">
+                    <span
+                      className={cn(
+                        "inline-block rounded border px-1.5 py-0.5",
+                        row.referenceParent
+                          ? "bg-muted/40"
+                          : "border-dashed text-muted-foreground",
+                      )}
+                      title={
+                        row.referenceParent
+                          ? `Looked up metafields.custom.referenceparent starting with "${row.referenceParent}"`
+                          : "Filename had no extractable token"
+                      }
+                    >
+                      {row.referenceParent || "—"}
                     </span>
                   </td>
                   <td className="p-2 align-middle text-xs text-destructive/90">
@@ -570,7 +596,7 @@ export function SendApprovalDialog({
   const [backup, setBackup] = useState(true);
   const { toast } = useToast();
 
-  const fetchMapData = useCallback(async () => {
+  const fetchMapData = useCallback(async (opts?: { bypassCache?: boolean }) => {
     if (!imp) return;
     setLoading(true);
     let images: ImportImage[] = [];
@@ -603,6 +629,7 @@ export function SendApprovalDialog({
         creds.token,
         images,
         brandId,
+        { bypassCache: opts?.bypassCache === true },
       );
 
       const matchedRows = filtered as WebhookProduct[];
@@ -768,6 +795,9 @@ export function SendApprovalDialog({
   };
 
   // ── Send: build payload once, then user picks Replace vs Add ───────────────
+  // Drop rows the server would reject (no productid OR no DB row id from the
+  // mapping). Silent server-side rejection used to surface as a vague "No
+  // valid products to upload" toast — catch it here instead.
   const buildPayload = (): WebhookProduct[] =>
     editableProducts
       .filter((_, i) => selectedRows.has(i))
@@ -787,10 +817,28 @@ export function SendApprovalDialog({
               ),
             }) as WebhookProduct,
         ),
-      );
+      )
+      .filter((row) => row.id && row.productid);
 
   const handleSendClick = () => {
     if (selectedRows.size === 0) return;
+    const payload = buildPayload();
+    if (payload.length === 0) {
+      // Every selected image is unmapped — show the failed-mappings list so
+      // the user sees *why* (no reference parent in filename, metafield not
+      // set on Shopify, etc.) rather than a generic server error.
+      if (failedMappings.length > 0) {
+        setFailedMappingsOpen(true);
+        return;
+      }
+      toast({
+        title: "Nothing to send",
+        description:
+          "None of the selected images map to a Shopify product yet. Check that filenames start with a SKU prefix that matches a Shopify product's metafields.custom.referenceparent.",
+        variant: "destructive",
+      });
+      return;
+    }
     setConfirmOpen(true);
   };
 
@@ -1001,6 +1049,19 @@ export function SendApprovalDialog({
                   View unmatched ({failedMappings.length})
                 </Button>
               )}
+              {!loading && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full sm:w-auto font-mono text-xs justify-center"
+                  onClick={() => fetchMapData({ bypassCache: true })}
+                  title="Re-query Shopify for all reference parents, ignoring the 7-day cache"
+                >
+                  <RotateCw className="h-3.5 w-3.5 mr-2 shrink-0" />
+                  Rescan
+                </Button>
+              )}
             </div>
             <div className="flex gap-2 justify-end w-full sm:w-auto shrink-0">
             <Button
@@ -1155,9 +1216,9 @@ function mergeFailedAndOrphans(
       id: img.id,
       file_name: img.file_name,
       file_url: img.file_url,
-      referenceParent: "",
+      referenceParent: referenceParentFromFileName(img.file_name),
       error:
-        "Not included in any matched Shopify product for this batch. Check the reference parent token before the first space or \"-\" in the filename.",
+        "Not included in any matched Shopify product for this batch. Check the reference parent token shown beside the filename.",
     });
   }
   return [...byUrl.values()];
