@@ -8,7 +8,6 @@ import {
   Trash2,
   ListChecks,
   History,
-  ArrowUpDown,
   Minimize2,
   Sparkles,
 } from "lucide-react";
@@ -48,7 +47,6 @@ import { fetchAllImportImageRows } from "@/lib/fetch-all-import-images";
 import { useImportUploadProgress } from "@/lib/import-upload-queue";
 import { takeImportSnapshot } from "@/lib/shopify-import-snapshots";
 import { reorderImportMedia } from "@/lib/shopify-product-reorder";
-import { ReorderPreviewDialog } from "@/components/ReorderPreviewDialog";
 import { RollbackDialog } from "@/components/RollbackDialog";
 
 export interface ImportImage {
@@ -100,7 +98,6 @@ type ImportTableRowProps = {
   onDelete: (imp: ImportListRow) => void;
   onShowStatus: (imp: ImportListRow) => void;
   onRollback: (imp: ImportListRow) => void;
-  onReorder: (imp: ImportListRow) => void;
   onCompress: (imp: ImportListRow) => void;
   onDedup: (imp: ImportListRow) => void;
 };
@@ -114,7 +111,6 @@ const ImportTableRow = memo(function ImportTableRow({
   onDelete,
   onShowStatus,
   onRollback,
-  onReorder,
   onCompress,
   onDedup,
 }: ImportTableRowProps) {
@@ -131,10 +127,6 @@ const ImportTableRow = memo(function ImportTableRow({
   // queue is still pushing files for this import to storage.
   const sendDisabled = isSending || uploadInFlight;
   const deleteDisabled = deletingId !== null || isSending || uploadInFlight;
-  // Reorder relies on shopify_product_id rows that are populated by the send step,
-  // so block until at least one image has succeeded on Shopify.
-  const reorderDisabled =
-    isSending || uploadInFlight || (imp.succeeded_count ?? 0) === 0;
   const isActive = imp.status === "queued" || imp.status === "processing";
   const showStatusButton =
     imp.status !== "pending" || (imp.succeeded_count ?? 0) + (imp.failed_count ?? 0) > 0;
@@ -265,17 +257,6 @@ const ImportTableRow = memo(function ImportTableRow({
             variant="ghost"
             size="sm"
             type="button"
-            onClick={() => onReorder(imp)}
-            disabled={reorderDisabled}
-            aria-label="Reorder product images by filename"
-            title="Reorder product images by filename"
-          >
-            <ArrowUpDown className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
             onClick={() => onCompress(imp)}
             disabled={imp.image_count === 0 || uploadInFlight}
             aria-label="Compress oversized images"
@@ -347,7 +328,6 @@ export function ImportTable({
 }: ImportTableProps) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [reorderTarget, setReorderTarget] = useState<ImportListRow | null>(null);
   // Imports the user just sent. We watch for them to land in a terminal state
   // (completed/partial) and then auto-reorder so the gallery follows the
   // filename convention without a second click.
@@ -731,7 +711,6 @@ export function ImportTable({
                 onDelete={setDeleteTarget}
                 onShowStatus={setStatusTarget}
                 onRollback={setRollbackTarget}
-                onReorder={setReorderTarget}
                 onCompress={setCompressTarget}
                 onDedup={setDedupTarget}
               />
@@ -803,17 +782,6 @@ export function ImportTable({
         }}
         importId={dedupTarget?.id ?? null}
         batchName={dedupTarget?.batch_name ?? null}
-        brandId={brandId}
-        onApplied={onStatusChange}
-      />
-
-      <ReorderPreviewDialog
-        open={!!reorderTarget}
-        onOpenChange={(open) => {
-          if (!open) setReorderTarget(null);
-        }}
-        importId={reorderTarget?.id ?? null}
-        batchName={reorderTarget?.batch_name ?? null}
         brandId={brandId}
         onApplied={onStatusChange}
       />
