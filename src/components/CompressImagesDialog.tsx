@@ -148,11 +148,13 @@ export function CompressImagesDialog({
             Compress images — {batchName || "Import"}
           </DialogTitle>
           <DialogDescription>
-            Re-encodes oversized photos that haven't been pushed to Shopify yet,
-            so the next send fits the 25 MB media limit. Targets{" "}
-            <span className="font-mono">2048 px</span> max, JPEG quality 85,
-            aiming below <span className="font-mono">1 MB</span> per image.
-            Images already on Shopify are skipped.
+            Re-encodes oversized photos in Supabase storage so a follow-up
+            re-send pushes smaller files (well under Shopify's 25 MB media
+            limit). Targets <span className="font-mono">2048 px</span> max,
+            JPEG quality 85, aiming below{" "}
+            <span className="font-mono">1 MB</span> per image. Shopify's copy
+            is not touched — to actually update Shopify, run{" "}
+            <span className="font-mono">Send → Replace</span> after compressing.
           </DialogDescription>
         </DialogHeader>
 
@@ -170,15 +172,12 @@ export function CompressImagesDialog({
                 Scan results
               </div>
               {stage.total === 0 ? (
-                <div>
-                  No pending images — every photo in this batch is already on
-                  Shopify.
-                </div>
+                <div>This batch has no images.</div>
               ) : (
                 <div>
                   <span className="font-mono">{stage.oversized}</span> of{" "}
-                  <span className="font-mono">{stage.total}</span> pending
-                  image{stage.total === 1 ? "" : "s"} are above{" "}
+                  <span className="font-mono">{stage.total}</span> image
+                  {stage.total === 1 ? "" : "s"} in storage are above{" "}
                   {formatMB(TARGET_BYTES)}.
                 </div>
               )}

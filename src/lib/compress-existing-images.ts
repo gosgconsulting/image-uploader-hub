@@ -1,19 +1,20 @@
 /**
- * Recompress staged import images that haven't been pushed to Shopify yet.
+ * Recompress import images sitting in Supabase storage so the next send to
+ * Shopify uses a smaller payload.
  *
- * Scope: rows in `shopify_import_images` with `shopify_media_id IS NULL` — i.e.
- * the images we *want to import* but haven't yet. Images that already landed on
- * Shopify are left alone; replacing the storage blob wouldn't update the copy
- * Shopify already cached, and Shopify accepted them at their original size, so
- * touching them here only risks drift.
+ * Scope: every row in `shopify_import_images` for the import — including ones
+ * already linked to Shopify media. Compressing the Supabase blob does not
+ * mutate Shopify's copy, but a follow-up Replace re-send will upload the
+ * smaller file. (Append mode skips by filename, so to actually push the
+ * compressed bytes the user runs Replace after compressing.)
  *
  * Why client-side: the existing resize pipeline (`image-resize.ts`) runs in the
  * browser using Canvas/OffscreenCanvas. Re-implementing that server-side in Deno
- * means pulling in WASM image libs and fighting edge-function timeouts, so we just
- * download the file, re-encode it locally, and overwrite the storage object.
+ * means pulling in WASM image libs and fighting edge-function timeouts, so we
+ * just download the file, re-encode it locally, and overwrite the storage object.
  *
- * The storage path is derived from `file_url` so the public URL stays valid after
- * the upsert — the next send-to-Shopify run pulls the smaller payload.
+ * The storage path is derived from `file_url` so the public URL stays valid
+ * after the upsert.
  */
 
 import { supabase } from "@/integrations/supabase/client";
@@ -30,7 +31,6 @@ interface ImportImageRow {
   file_name: string;
   file_url: string;
   file_size: number | null;
-  shopify_media_id: string | null;
 }
 
 export interface CompressItemResult {
@@ -221,10 +221,10 @@ function reEncodeUrlBasename(url: string): string | null {
 }
 
 /**
- * Count how many *not-yet-imported* images are above `minSizeBytes`.
- *
- * `total` is the count of pending rows (no `shopify_media_id`), not the whole
- * import — already-on-Shopify images are out of scope for compression.
+ * Count how many images for the import sit above `minSizeBytes` in Supabase
+ * storage. Operates on every row, including ones already on Shopify — the
+ * intent is to shrink the source bytes so a follow-up Replace re-send pushes
+ * smaller files.
  */
 export async function countOversizeImages(
   importId: string,
@@ -233,24 +233,22 @@ export async function countOversizeImages(
   const result = await fetchAllImportImageRows<{
     id: string;
     file_size: number | null;
-    shopify_media_id: string | null;
   }>(supabase, {
     importId,
-    select: "id, file_size, shopify_media_id",
+    select: "id, file_size",
   });
   if (!result.ok) return { ok: false, error: result.error };
-  const pending = result.rows.filter((r) => !r.shopify_media_id);
-  const oversized = pending.filter(
+  const oversized = result.rows.filter(
     (r) => (r.file_size ?? 0) > minSizeBytes,
   ).length;
-  return { ok: true, total: pending.length, oversized };
+  return { ok: true, total: result.rows.length, oversized };
 }
 
 /**
- * Compress every oversized image we still need to import (i.e. pending rows
- * with no `shopify_media_id`) in place. Existing public URLs are preserved
- * (upsert to the same storage key), so the queued send-to-Shopify run picks
- * up the smaller payload without any other plumbing change.
+ * Compress every oversized image in the import in place. Existing public URLs
+ * are preserved (upsert to the same storage key). Compressing does NOT touch
+ * Shopify's copy — the user must re-send (Replace mode) afterwards to push
+ * the smaller bytes; Append mode would skip them by filename match.
  */
 export async function compressImportImages(
   importId: string,
@@ -261,17 +259,14 @@ export async function compressImportImages(
 
   const result = await fetchAllImportImageRows<ImportImageRow>(supabase, {
     importId,
-    select: "id, file_name, file_url, file_size, shopify_media_id",
+    select: "id, file_name, file_url, file_size",
   });
   if (!result.ok) {
     throw new Error(`Could not load images: ${result.error}`);
   }
 
   const targets = result.rows.filter(
-    (r) =>
-      r.file_url &&
-      !r.shopify_media_id &&
-      (r.file_size ?? 0) > minSize,
+    (r) => r.file_url && (r.file_size ?? 0) > minSize,
   );
 
   const summary: CompressSummary = {
