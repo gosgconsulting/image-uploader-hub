@@ -300,14 +300,23 @@ function detectColorOption(product: ProductFull): {
 
 /**
  * Variant-aware order: group media by detected color (matched against the product's
- * actual color option values), order groups by the variant order, then sort within each
- * group by the trailing position number from the filename.
+ * actual color option values), order groups by the variant order, then within each
+ * color group put FRONT shots first, then BACK shots, then everything else, each
+ * sub-group ordered by the trailing position number from the filename.
  *
- * Media that don't match any color (e.g. "ROBE-BACK.jpg") fall into a "no color" bucket
- * placed AFTER the colored groups so the per-variant featured images remain at the front.
+ * Example for color CRÈME:
+ *   CHC26161-CREME-FRONT-1.jpg
+ *   CHC26161-CREME-FRONT-2.jpg
+ *   CHC26161-CREME-BACK-1.jpg
+ *   CHC26161-CREME-BACK-2.jpg
+ *   CHC26161-CREME-3.jpg          ← unmarked shots after the front/back set
  *
- * If the product has no color option, behaves like the original product-level reorder
- * (single bucket sorted by trailing index).
+ * Media that don't match any color (e.g. "ROBE-LOOKBOOK.jpg") fall into a "no color"
+ * bucket placed AFTER the colored groups so the per-variant featured images remain
+ * at the front.
+ *
+ * If the product has no color option, behaves like the original product-level
+ * reorder but still respects front-then-back inside the single bucket.
  */
 function computeProposedOrder(
   product: ProductFull,
@@ -320,24 +329,38 @@ function computeProposedOrder(
   const nodes = product.media.nodes;
   const knownColors = colorOpt?.values ?? [];
 
-  // Pass 1: parse each media's filename → {color, position}.
+  // Pass 1: parse each media's filename → {color, view, position}.
   const decorated = nodes.map((n, originalIdx) => {
     const fname = filenameFor(n);
     const parsed = parseProductImageFilename(fname, knownColors);
     // Fall back to legacy regex if parser couldn't find a position.
     const position =
       parsed.position !== 999 ? parsed.position : trailingIndex(fname);
-    return { node: n, originalIdx, color: parsed.color, position };
+    return {
+      node: n,
+      originalIdx,
+      color: parsed.color,
+      view: parsed.view,
+      position,
+    };
   });
 
   // Pass 2: bucket by color in the variant order; unknown colors go to the end bucket.
   const colorOrder = new Map<string, number>();
   knownColors.forEach((c, i) => colorOrder.set(c, i));
 
+  // View bucket: FRONT first, BACK next, untagged last. Within each view sub-
+  // bucket the trailing position number takes over.
+  const viewOrder = (v: "front" | "back" | null): number =>
+    v === "front" ? 0 : v === "back" ? 1 : 2;
+
   const sortedIdx = [...decorated].sort((a, b) => {
     const aBucket = a.color !== null ? (colorOrder.get(a.color) ?? 999) : 1000;
     const bBucket = b.color !== null ? (colorOrder.get(b.color) ?? 999) : 1000;
     if (aBucket !== bBucket) return aBucket - bBucket;
+    const aView = viewOrder(a.view);
+    const bView = viewOrder(b.view);
+    if (aView !== bView) return aView - bView;
     if (a.position !== b.position) return a.position - b.position;
     return a.originalIdx - b.originalIdx;
   });

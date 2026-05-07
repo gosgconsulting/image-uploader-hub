@@ -19,6 +19,18 @@
 
 const NO_POSITION = 999; // sentinel; sorts last
 
+/**
+ * View tokens we recognise inside a filename: front-of-garment shots, back-of-
+ * garment shots, and detail/closeup variants. Used by the reorder pipeline to
+ * group front images before back images within a single color group, so the
+ * gallery reads `front-1, front-2, back-1, back-2` instead of interleaving
+ * by trailing number alone.
+ */
+const FRONT_TOKENS = new Set(["FRONT", "FACE", "AVANT"]);
+const BACK_TOKENS = new Set(["BACK", "DOS", "ARRIERE", "ARRIÈRE"]);
+
+export type FilenameView = "front" | "back" | null;
+
 export type ParsedFilename = {
   ref: string;
   /** Matched against `knownColors` (preserving the caller's original casing). */
@@ -27,6 +39,12 @@ export type ParsedFilename = {
    *  Shopify option represents color when the option is named anything other than
    *  Color/Couleur. */
   candidateColor: string | null;
+  /**
+   * Detected viewpoint token (front / back). Independent of color — a filename
+   * can carry both (`CHC26161-CREME-FRONT-3.jpg`) or just one
+   * (`CHC26161-FRONT-3.jpg` for products with no color option).
+   */
+  view: FilenameView;
   position: number;
 };
 
@@ -66,6 +84,25 @@ function buildColorIndex(known: string[]): Map<string, string> {
   return idx;
 }
 
+/**
+ * Detect a front/back viewpoint marker in the middle tokens. Returns the first
+ * matching token (front wins on ties — purely cosmetic since both are O(n)).
+ * Tokens that contributed to a successful color match are excluded by the
+ * `excludeIdx` set so a color called "BACK" wouldn't double as a view marker.
+ */
+function detectView(
+  middle: string[],
+  excludeIdx: Set<number>,
+): FilenameView {
+  for (let i = 0; i < middle.length; i++) {
+    if (excludeIdx.has(i)) continue;
+    const t = normalizeForMatch(middle[i]);
+    if (FRONT_TOKENS.has(t)) return "front";
+    if (BACK_TOKENS.has(t)) return "back";
+  }
+  return null;
+}
+
 export function parseProductImageFilename(
   filename: string,
   knownColors: string[] = [],
@@ -74,6 +111,7 @@ export function parseProductImageFilename(
     ref: "",
     color: null,
     candidateColor: null,
+    view: null,
     position: NO_POSITION,
   };
   if (!filename) return empty;
@@ -97,37 +135,49 @@ export function parseProductImageFilename(
   const candidateColor =
     middle.length > 0 ? middle.join(" ").toUpperCase() : null;
 
-  if (middle.length === 0 || knownColors.length === 0) {
-    return { ref, color: null, candidateColor, position };
+  if (middle.length === 0) {
+    return { ref, color: null, candidateColor, view: null, position };
   }
 
-  // Walk the middle tokens; for each starting index find the longest run that maps to
-  // a known color. Prefer the longest match, then the earliest start.
-  const colorIdx = buildColorIndex(knownColors);
   let bestMatch: { color: string; len: number; start: number } | null = null;
-  for (let start = 0; start < middle.length; start++) {
-    for (let len = middle.length - start; len >= 1; len--) {
-      const candidate = normalizeForMatch(
-        middle.slice(start, start + len).join(" "),
-      );
-      const hit = colorIdx.get(candidate);
-      if (hit) {
-        if (
-          !bestMatch ||
-          len > bestMatch.len ||
-          (len === bestMatch.len && start < bestMatch.start)
-        ) {
-          bestMatch = { color: hit, len, start };
+  if (knownColors.length > 0) {
+    // Walk the middle tokens; for each starting index find the longest run that maps to
+    // a known color. Prefer the longest match, then the earliest start.
+    const colorIdx = buildColorIndex(knownColors);
+    for (let start = 0; start < middle.length; start++) {
+      for (let len = middle.length - start; len >= 1; len--) {
+        const candidate = normalizeForMatch(
+          middle.slice(start, start + len).join(" "),
+        );
+        const hit = colorIdx.get(candidate);
+        if (hit) {
+          if (
+            !bestMatch ||
+            len > bestMatch.len ||
+            (len === bestMatch.len && start < bestMatch.start)
+          ) {
+            bestMatch = { color: hit, len, start };
+          }
+          break; // longest at this `start` found
         }
-        break; // longest at this `start` found
       }
     }
   }
+
+  // View detection: scan middle tokens that weren't consumed by the color match.
+  const colorIdxSet = new Set<number>();
+  if (bestMatch) {
+    for (let i = bestMatch.start; i < bestMatch.start + bestMatch.len; i++) {
+      colorIdxSet.add(i);
+    }
+  }
+  const view = detectView(middle, colorIdxSet);
 
   return {
     ref,
     color: bestMatch?.color ?? null,
     candidateColor,
+    view,
     position,
   };
 }
