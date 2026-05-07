@@ -23,8 +23,14 @@ const ADD_PRODUCT_MEDIA = `mutation AddProductImages($productId: ID!, $media: [C
   }
 }`;
 
-// For dedup: pull every existing media on a product with enough info
-// (alt + image URL) that we can recognize an incoming filename as already there.
+// For dedup: pull every existing media on a product, including its processing
+// status. Shopify's productCreateMedia is async — after a successful mutation
+// the media goes through PROCESSING → READY (or FAILED if the source URL was
+// unreachable, the file was too large, etc.). A draft product whose media
+// shows "Le traitement du support multimédia a échoué" has FAILED items, but
+// our previous dedup treated those as a hit and skipped re-uploading them on
+// the next send. We now skip non-READY items so the next push actually
+// re-tries the upload.
 const LIST_PRODUCT_MEDIA_DETAIL = `query ListProductMediaDetail($id: ID!, $cursor: String) {
   product(id: $id) {
     id
@@ -33,8 +39,21 @@ const LIST_PRODUCT_MEDIA_DETAIL = `query ListProductMediaDetail($id: ID!, $curso
       nodes {
         id
         alt
+        status
+        mediaErrors { code details message }
         ... on MediaImage { image { url } }
       }
+    }
+  }
+}`;
+
+/** Tail of `productCreateMedia` — used to verify status and surface processing errors. */
+const QUERY_MEDIA_BY_IDS = `query NodesById($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    id
+    ... on Media {
+      status
+      mediaErrors { code details message }
     }
   }
 }`;
@@ -88,7 +107,16 @@ async function fetchExistingFilenameMap(
   shopHost: string,
   accessToken: string,
   productId: string,
-): Promise<{ ok: true; map: Map<string, string> } | { ok: false; error: string }> {
+): Promise<
+  | {
+      ok: true;
+      /** Filename → media_id for READY media (i.e. real, processed images). */
+      map: Map<string, string>;
+      /** Filename → media_id for FAILED media. The dedup pass deletes these before re-uploading the same filename so we don't pile up zombie copies. */
+      failedMap: Map<string, string>;
+    }
+  | { ok: false; error: string }
+> {
   const gqlUrl = `https://${shopHost}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
   const headers = {
     "X-Shopify-Access-Token": accessToken,
@@ -97,6 +125,7 @@ async function fetchExistingFilenameMap(
   } as const;
 
   const map = new Map<string, string>();
+  const failedMap = new Map<string, string>();
   let cursor: string | null = null;
   for (;;) {
     let raw: {
@@ -105,7 +134,12 @@ async function fetchExistingFilenameMap(
         product?: {
           media?: {
             pageInfo?: { hasNextPage?: boolean; endCursor?: string };
-            nodes?: Array<{ id?: string; alt?: string | null; image?: { url?: string } | null }>;
+            nodes?: Array<{
+              id?: string;
+              alt?: string | null;
+              status?: string | null;
+              image?: { url?: string } | null;
+            }>;
           };
         };
       };
@@ -133,12 +167,137 @@ async function fetchExistingFilenameMap(
         alt: n.alt ?? null,
         image: n.image?.url ? { url: n.image.url } : null,
       });
-      if (key && n.id && !map.has(key)) map.set(key, n.id);
+      if (!key || !n.id) continue;
+      // READY  → real image, dedup-skip on filename match.
+      // FAILED → broken stub the merchant sees as red banner; track separately
+      //          so the dedup pass can delete it before re-uploading.
+      // PROCESSING / UPLOADED / unknown → still in flight; ignore (next pass
+      //          will re-evaluate when status settles).
+      if (n.status === "FAILED") {
+        if (!failedMap.has(key)) failedMap.set(key, n.id);
+      } else if (!n.status || n.status === "READY") {
+        if (!map.has(key)) map.set(key, n.id);
+      }
     }
     if (!page?.pageInfo?.hasNextPage || !page.pageInfo.endCursor) break;
     cursor = page.pageInfo.endCursor;
   }
-  return { ok: true, map };
+  return { ok: true, map, failedMap };
+}
+
+/**
+ * Verify that media we just created actually finished processing on Shopify's
+ * side. `productCreateMedia` returns immediately with an id even though the
+ * file is still being downloaded from `originalSource` — and a few seconds
+ * later it can flip to FAILED (broken URL, oversized, format Shopify can't
+ * process). The mutation never tells us, so without this poll our DB happily
+ * records `succeeded` for media that the merchant sees as a red error banner.
+ *
+ * Returns the post-processing status for each id, or `null` when Shopify
+ * never returned the id (deleted between request and verify).
+ */
+async function verifyMediaStatus(
+  shopHost: string,
+  accessToken: string,
+  mediaIds: string[],
+): Promise<
+  Map<string, { status: "READY" | "PROCESSING" | "FAILED" | "UPLOADED" | "UNKNOWN"; error?: string }>
+> {
+  const out = new Map<
+    string,
+    { status: "READY" | "PROCESSING" | "FAILED" | "UPLOADED" | "UNKNOWN"; error?: string }
+  >();
+  if (mediaIds.length === 0) return out;
+
+  const gqlUrl = `https://${shopHost}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+  const headers = {
+    "X-Shopify-Access-Token": accessToken,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  } as const;
+
+  // Poll up to 4 times: Shopify usually finishes a JPEG in <2s; bigger sources
+  // can take longer. We give up at ~15s and let the next send re-verify if
+  // anything is still PROCESSING.
+  const DELAYS_MS = [2000, 3000, 4000, 6000];
+  let pending = [...mediaIds];
+
+  for (let attempt = 0; attempt < DELAYS_MS.length && pending.length > 0; attempt += 1) {
+    await new Promise((r) => setTimeout(r, DELAYS_MS[attempt]));
+
+    let raw: {
+      errors?: Array<{ message?: string }>;
+      data?: {
+        nodes?: Array<{
+          id?: string;
+          status?: string;
+          mediaErrors?: Array<{ code?: string; details?: string; message?: string }>;
+        } | null>;
+      };
+    };
+    try {
+      const r = await fetch(gqlUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query: QUERY_MEDIA_BY_IDS, variables: { ids: pending } }),
+      });
+      raw = await r.json();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      console.warn(
+        `[shopify-import-media] verify attempt ${attempt + 1} fetch failed: ${msg}`,
+      );
+      continue;
+    }
+    if (raw.errors?.length) {
+      console.warn(
+        `[shopify-import-media] verify attempt ${attempt + 1} graphql error: ${raw.errors[0]?.message}`,
+      );
+      continue;
+    }
+
+    const nextPending: string[] = [];
+    const nodes = raw.data?.nodes ?? [];
+    const byId = new Map<string, (typeof nodes)[number]>();
+    for (const n of nodes) {
+      if (n?.id) byId.set(n.id, n);
+    }
+
+    for (const id of pending) {
+      const n = byId.get(id);
+      if (!n) {
+        out.set(id, { status: "UNKNOWN", error: "Node not found on Shopify" });
+        continue;
+      }
+      const status = (n.status ?? "UNKNOWN") as
+        | "READY"
+        | "PROCESSING"
+        | "FAILED"
+        | "UPLOADED"
+        | "UNKNOWN";
+      if (status === "READY") {
+        out.set(id, { status });
+      } else if (status === "FAILED") {
+        const errMsg =
+          n.mediaErrors?.[0]?.message ||
+          n.mediaErrors?.[0]?.details ||
+          n.mediaErrors?.[0]?.code ||
+          "Shopify rejected the media";
+        out.set(id, { status, error: errMsg });
+      } else {
+        // PROCESSING / UPLOADED / UNKNOWN — keep polling.
+        nextPending.push(id);
+      }
+    }
+    pending = nextPending;
+  }
+
+  // Anything still pending after all polls is recorded as PROCESSING so the
+  // next dedup pass (which skips non-READY) re-uploads it if it stays stuck.
+  for (const id of pending) {
+    out.set(id, { status: "PROCESSING" });
+  }
+  return out;
 }
 
 /**
@@ -175,6 +334,11 @@ async function wipeNonImportedProductMedia(
   const toDelete: string[] = [];
   for (const [fname, mediaId] of existing.map) {
     if (!expectedFilenames.has(fname)) toDelete.push(mediaId);
+  }
+  // Replace mode also flushes every FAILED media stub. They're broken and the
+  // dedup pass will recreate the ones whose filenames are in the import.
+  for (const [, mediaId] of existing.failedMap) {
+    toDelete.push(mediaId);
   }
   if (toDelete.length === 0) return { deleted: 0 };
 
@@ -448,40 +612,89 @@ async function processOneProduct(
       accessToken,
       productGid,
     );
-    if (existing.ok && existing.map.size > 0) {
-      const toSkip: Array<(typeof orderedWithIds)[number] & { mediaId: string }> = [];
-      const toUpload: typeof orderedWithIds = [];
-      for (const r of orderedWithIds) {
-        const fname = normalizeFilename(
-          r.original_file_name || r.file_name || "",
-        );
-        const matchId = fname ? existing.map.get(fname) : undefined;
-        if (matchId) toSkip.push({ ...r, mediaId: matchId });
-        else toUpload.push(r);
+    if (existing.ok) {
+      // 1. Find FAILED stubs whose filename matches anything in this batch and
+      //    delete them. Otherwise the new upload would land alongside the
+      //    broken one and the merchant would see two `IMG.jpg` entries with
+      //    the same name on the product.
+      if (existing.failedMap.size > 0) {
+        const failedIdsToDelete: string[] = [];
+        for (const r of orderedWithIds) {
+          const fname = normalizeFilename(
+            r.original_file_name || r.file_name || "",
+          );
+          const failedId = fname ? existing.failedMap.get(fname) : undefined;
+          if (failedId) failedIdsToDelete.push(failedId);
+        }
+        if (failedIdsToDelete.length > 0) {
+          // Reuse the existing wipe mutation pattern (productDeleteMedia,
+          // chunked at 100). The tiny inline call here keeps the dedup pass
+          // self-contained.
+          const gqlUrl = `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+          const headers = {
+            "X-Shopify-Access-Token": accessToken,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          } as const;
+          const CHUNK = 100;
+          for (let i = 0; i < failedIdsToDelete.length; i += CHUNK) {
+            const ids = failedIdsToDelete.slice(i, i + CHUNK);
+            try {
+              await fetch(gqlUrl, {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                  query: DELETE_PRODUCT_MEDIA,
+                  variables: { productId: productGid, mediaIds: ids },
+                }),
+              });
+            } catch (e) {
+              console.warn(
+                `[shopify-import-media] product=${productGid} could not clean up FAILED stub: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+          }
+          console.log(
+            `[shopify-import-media] product=${productGid} cleaned up ${failedIdsToDelete.length} FAILED media stub(s) before re-upload`,
+          );
+        }
       }
-      if (toSkip.length > 0) {
-        const completedAt = new Date().toISOString();
-        // Update each skipped row individually so we can write the matched media_id.
-        await Promise.all(
-          toSkip.map((r) =>
-            admin
-              .from("shopify_import_images")
-              .update({
-                status: "skipped",
-                shopify_media_id: r.mediaId,
-                error_message: "Already on product (filename matched)",
-                completed_at: completedAt,
-                started_at: completedAt,
-              })
-              .eq("id", r.id),
-          ),
-        );
-        skipped = toSkip.length;
-        console.log(
-          `[shopify-import-media] product=${productGid} dedup skipped=${skipped} (already on product)`,
-        );
+
+      // 2. Skip-link rows that already match a READY (real) media on the product.
+      if (existing.map.size > 0) {
+        const toSkip: Array<(typeof orderedWithIds)[number] & { mediaId: string }> = [];
+        const toUpload: typeof orderedWithIds = [];
+        for (const r of orderedWithIds) {
+          const fname = normalizeFilename(
+            r.original_file_name || r.file_name || "",
+          );
+          const matchId = fname ? existing.map.get(fname) : undefined;
+          if (matchId) toSkip.push({ ...r, mediaId: matchId });
+          else toUpload.push(r);
+        }
+        if (toSkip.length > 0) {
+          const completedAt = new Date().toISOString();
+          await Promise.all(
+            toSkip.map((r) =>
+              admin
+                .from("shopify_import_images")
+                .update({
+                  status: "skipped",
+                  shopify_media_id: r.mediaId,
+                  error_message: "Already on product (filename matched)",
+                  completed_at: completedAt,
+                  started_at: completedAt,
+                })
+                .eq("id", r.id),
+            ),
+          );
+          skipped = toSkip.length;
+          console.log(
+            `[shopify-import-media] product=${productGid} dedup skipped=${skipped} (already on product)`,
+          );
+        }
+        orderedWithIds = toUpload;
       }
-      orderedWithIds = toUpload;
     }
     // If the existence check failed (network blip, auth issue) we deliberately fall
     // through and try to upload everything. Worst case: a duplicate row, which the
@@ -550,6 +763,10 @@ async function processOneProduct(
         );
       failed += chunk.length;
     } else {
+      // Optimistic write: record media ids + succeeded so the row reflects
+      // Shopify's accept. Then verify the actual processing status — if
+      // Shopify FAILS the media after the fact (broken source URL, oversized,
+      // bad format, etc.) we flip the row to `failed` with the real error.
       await Promise.all(
         chunk.map((item, idx) =>
           admin
@@ -564,6 +781,49 @@ async function processOneProduct(
         ),
       );
       succeeded += chunk.length;
+
+      const mediaIdToRow = new Map<string, (typeof chunk)[number]>();
+      for (let idx = 0; idx < chunk.length; idx += 1) {
+        const mid = batchResult.mediaIds[idx];
+        if (mid) mediaIdToRow.set(mid, chunk[idx]);
+      }
+      if (mediaIdToRow.size > 0) {
+        const verifyMap = await verifyMediaStatus(
+          shopDomain,
+          accessToken,
+          [...mediaIdToRow.keys()],
+        );
+        const failedUpdates: Array<{ id: string; error: string }> = [];
+        for (const [mediaId, info] of verifyMap) {
+          if (info.status !== "FAILED") continue;
+          const row = mediaIdToRow.get(mediaId);
+          if (!row) continue;
+          failedUpdates.push({
+            id: row.id,
+            error: info.error || "Shopify processing failed",
+          });
+        }
+        if (failedUpdates.length > 0) {
+          const failedAt = new Date().toISOString();
+          await Promise.all(
+            failedUpdates.map((u) =>
+              admin
+                .from("shopify_import_images")
+                .update({
+                  status: "failed",
+                  error_message: `Shopify processing failed: ${u.error}`.slice(0, 1000),
+                  completed_at: failedAt,
+                })
+                .eq("id", u.id),
+            ),
+          );
+          succeeded -= failedUpdates.length;
+          failed += failedUpdates.length;
+          console.warn(
+            `[shopify-import-media] product=${productGid} ${failedUpdates.length} media reported FAILED after upload: ${failedUpdates.map((u) => u.error).slice(0, 3).join(" | ")}`,
+          );
+        }
+      }
     }
 
     if (i + MEDIA_BATCH < orderedWithIds.length && INTER_BATCH_DELAY_MS > 0) {
