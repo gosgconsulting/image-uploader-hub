@@ -121,9 +121,12 @@ const REORDER_PRODUCT_MEDIA = `mutation ReorderProductMedia($id: ID!, $moves: [M
   }
 }`;
 
+// `mediaCount` was removed from ProductVariant in Shopify Admin API 2026-04;
+// asking for it makes the whole mutation fail. We only need `id` to count
+// successful updates anyway.
 const VARIANTS_BULK_UPDATE = `mutation VariantsSetMedia($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
   productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-    productVariants { id mediaCount }
+    productVariants { id }
     userErrors { field message }
   }
 }`;
@@ -720,6 +723,10 @@ async function applyProduct(
   let variantMediaDetached = 0;
   let variantMediaAppended = 0;
   if (associations.detaches.length > 0) {
+    // Same one-mediaId-per-input constraint as append.
+    const flatDetaches = associations.detaches.flatMap((d) =>
+      d.mediaIds.map((mediaId) => ({ variantId: d.variantId, mediaIds: [mediaId] })),
+    );
     const det = await shopifyGql<{
       productVariantDetachMedia: {
         productVariants: Array<{ id: string }>;
@@ -727,7 +734,7 @@ async function applyProduct(
       };
     }>(shopHost, accessToken, VARIANT_DETACH_MEDIA, {
       productId,
-      variantMedia: associations.detaches,
+      variantMedia: flatDetaches,
     });
     if (!det.ok) {
       variantError = appendErr(variantError, `variant detach: ${det.error}`);
@@ -744,6 +751,12 @@ async function applyProduct(
     }
   }
   if (associations.appends.length > 0) {
+    // Shopify Admin API 2026-04 enforces "Only one mediaId is allowed per
+    // media input" on ProductVariantAppendMediaInput, so flatten the
+    // {variantId, mediaIds[]} shape into one entry per (variantId, mediaId).
+    const flatAppends = associations.appends.flatMap((a) =>
+      a.mediaIds.map((mediaId) => ({ variantId: a.variantId, mediaIds: [mediaId] })),
+    );
     const app = await shopifyGql<{
       productVariantAppendMedia: {
         productVariants: Array<{ id: string }>;
@@ -751,7 +764,7 @@ async function applyProduct(
       };
     }>(shopHost, accessToken, VARIANT_APPEND_MEDIA, {
       productId,
-      variantMedia: associations.appends,
+      variantMedia: flatAppends,
     });
     if (!app.ok) {
       variantError = appendErr(variantError, `variant append: ${app.error}`);
