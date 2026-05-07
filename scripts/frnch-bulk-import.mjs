@@ -18,6 +18,18 @@ if (!ACCESS_TOKEN) {
 
 const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]);
 
+const MAX_FILE_NAME_LEN = 200;
+// Mirror server-side sanitizer in shopify-import-create so the path the edge
+// function signs matches what we PUT to. Supabase Storage rejects keys with
+// non-ASCII (e.g. "PÂLE", "É") with InvalidKey 400.
+const sanitizeFileName = (name) => {
+  let s = String(name).replace(/[\\/]/g, "_").trim();
+  s = s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  s = s.replace(/[^A-Za-z0-9._\-()]/g, "_");
+  s = s.replace(/_+/g, "_");
+  return s.slice(0, MAX_FILE_NAME_LEN);
+};
+
 const mimeFor = (name) => {
   const ext = extname(name).toLowerCase();
   if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
@@ -36,7 +48,7 @@ for (const name of entries) {
   const full = join(SOURCE_DIR, name);
   const s = await stat(full);
   if (!s.isFile()) continue;
-  files.push({ full, name: basename(full), size: s.size });
+  files.push({ full, name: sanitizeFileName(basename(full)), size: s.size });
 }
 console.log(`[scan] found ${files.length} image files`);
 if (files.length === 0) process.exit(1);
