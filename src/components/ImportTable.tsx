@@ -35,9 +35,15 @@ import { ImportStatusModal } from "@/components/ImportStatusModal";
 import { CompressImagesDialog } from "@/components/CompressImagesDialog";
 import { DeduplicateDialog } from "@/components/DeduplicateDialog";
 import {
+  ImageActionsChooserDialog,
+  type ImageAction,
+} from "@/components/ImageActionsChooserDialog";
+import { ReorderPositionDialog } from "@/components/ReorderPositionDialog";
+import {
   SendApprovalDialog,
   type SendApprovalImport,
   type UploadMode,
+  type BatchPosition,
   WebhookProduct,
 } from "@/components/SendApprovalDialog";
 import { useToast } from "@/hooks/use-toast";
@@ -99,7 +105,7 @@ type ImportTableRowProps = {
   onShowStatus: (imp: ImportListRow) => void;
   onRollback: (imp: ImportListRow) => void;
   onCompress: (imp: ImportListRow) => void;
-  onDedup: (imp: ImportListRow) => void;
+  onImageActions: (imp: ImportListRow) => void;
 };
 
 const ImportTableRow = memo(function ImportTableRow({
@@ -112,7 +118,7 @@ const ImportTableRow = memo(function ImportTableRow({
   onShowStatus,
   onRollback,
   onCompress,
-  onDedup,
+  onImageActions,
 }: ImportTableRowProps) {
   const isSending = sendingId === imp.id;
   const isDeleting = deletingId === imp.id;
@@ -268,7 +274,7 @@ const ImportTableRow = memo(function ImportTableRow({
             variant="ghost"
             size="sm"
             type="button"
-            onClick={() => onDedup(imp)}
+            onClick={() => onImageActions(imp)}
             disabled={
               uploadInFlight ||
               imp.status === "pending" ||
@@ -276,8 +282,8 @@ const ImportTableRow = memo(function ImportTableRow({
               imp.status === "processing" ||
               imp.image_count === 0
             }
-            aria-label="Deduplicate misattributed images"
-            title="Deduplicate misattributed images on Shopify (AI-assisted)"
+            aria-label="Image actions (deduplicate, reorder position)"
+            title="Image actions (deduplicate · reorder position)"
           >
             <Sparkles className="h-3.5 w-3.5" />
           </Button>
@@ -330,8 +336,10 @@ export function ImportTable({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // Imports the user just sent. We watch for them to land in a terminal state
   // (completed/partial) and then auto-reorder so the gallery follows the
-  // filename convention without a second click.
-  const pendingAutoReorderRef = useRef<Set<string>>(new Set());
+  // filename convention without a second click. The value is the batch position
+  // chosen in the SendApprovalDialog so the reorder places this batch first or
+  // last relative to media from earlier imports on the same product.
+  const pendingAutoReorderRef = useRef<Map<string, BatchPosition>>(new Map());
   const [deleteTarget, setDeleteTarget] = useState<ImportListRow | null>(null);
   const [preview, setPreview] = useState<{
     batchName: string;
@@ -343,6 +351,12 @@ export function ImportTable({
   const [rollbackTarget, setRollbackTarget] = useState<ImportListRow | null>(null);
   const [compressTarget, setCompressTarget] = useState<ImportListRow | null>(null);
   const [dedupTarget, setDedupTarget] = useState<ImportListRow | null>(null);
+  // Sparkles button now opens a chooser; the chooser's pick promotes the
+  // pending row into either dedupTarget or reorderPositionTarget.
+  const [actionsChooserTarget, setActionsChooserTarget] =
+    useState<ImportListRow | null>(null);
+  const [reorderPositionTarget, setReorderPositionTarget] =
+    useState<ImportListRow | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -350,7 +364,7 @@ export function ImportTable({
     if (!trimmedBrand) return;
     const pending = pendingAutoReorderRef.current;
     if (pending.size === 0) return;
-    const ready: string[] = [];
+    const ready: Array<{ id: string; batchPosition: BatchPosition }> = [];
     for (const imp of imports) {
       if (!pending.has(imp.id)) continue;
       if (
@@ -358,14 +372,17 @@ export function ImportTable({
         imp.status === "partial" ||
         imp.status === "failed"
       ) {
-        ready.push(imp.id);
+        ready.push({ id: imp.id, batchPosition: pending.get(imp.id) ?? "last" });
       }
     }
     if (ready.length === 0) return;
-    for (const id of ready) pending.delete(id);
+    for (const { id } of ready) pending.delete(id);
     void (async () => {
-      for (const id of ready) {
-        const res = await reorderImportMedia(trimmedBrand, id, { dryRun: false });
+      for (const { id, batchPosition } of ready) {
+        const res = await reorderImportMedia(trimmedBrand, id, {
+          dryRun: false,
+          batchPosition,
+        });
         if (!res.ok) {
           toast({
             title: "Auto-reorder failed",
@@ -418,6 +435,7 @@ export function ImportTable({
     products: WebhookProduct[],
     mode: UploadMode,
     backup: boolean,
+    batchPosition: BatchPosition,
   ) => {
     const webhookTarget = imp.webhook_url || webhookUrl;
     const trimmedBrand = brandId?.trim() ?? "";
@@ -507,7 +525,7 @@ export function ImportTable({
             nativeAccepted = true;
             // Mark this import for auto-reorder once the background worker finishes.
             // The watcher effect below detects the terminal status flip.
-            pendingAutoReorderRef.current.add(imp.id);
+            pendingAutoReorderRef.current.set(imp.id, batchPosition);
             const pending = typeof data.pending === "number" ? data.pending : products.length;
             const skipped = data.skipped_already_done ?? 0;
             toast({
@@ -712,7 +730,7 @@ export function ImportTable({
                 onShowStatus={setStatusTarget}
                 onRollback={setRollbackTarget}
                 onCompress={setCompressTarget}
-                onDedup={setDedupTarget}
+                onImageActions={setActionsChooserTarget}
               />
             ))}
           </TableBody>
@@ -746,9 +764,9 @@ export function ImportTable({
           if (!open) setApprovalImport(null);
         }}
         imp={approvalImport}
-        onApprove={(imp, products, mode, backup) => {
+        onApprove={(imp, products, mode, backup, batchPosition) => {
           setApprovalImport(null);
-          handleTriggerWebhook(imp, products, mode, backup);
+          handleTriggerWebhook(imp, products, mode, backup, batchPosition);
         }}
         isSending={sendingId === approvalImport?.id}
         onDataChange={onStatusChange}
@@ -775,6 +793,21 @@ export function ImportTable({
         onCompleted={onStatusChange}
       />
 
+      <ImageActionsChooserDialog
+        open={!!actionsChooserTarget}
+        onOpenChange={(open) => {
+          if (!open) setActionsChooserTarget(null);
+        }}
+        batchName={actionsChooserTarget?.batch_name ?? null}
+        onPick={(action: ImageAction) => {
+          const target = actionsChooserTarget;
+          setActionsChooserTarget(null);
+          if (!target) return;
+          if (action === "deduplicate") setDedupTarget(target);
+          else if (action === "reorder-position") setReorderPositionTarget(target);
+        }}
+      />
+
       <DeduplicateDialog
         open={!!dedupTarget}
         onOpenChange={(open) => {
@@ -782,6 +815,17 @@ export function ImportTable({
         }}
         importId={dedupTarget?.id ?? null}
         batchName={dedupTarget?.batch_name ?? null}
+        brandId={brandId}
+        onApplied={onStatusChange}
+      />
+
+      <ReorderPositionDialog
+        open={!!reorderPositionTarget}
+        onOpenChange={(open) => {
+          if (!open) setReorderPositionTarget(null);
+        }}
+        importId={reorderPositionTarget?.id ?? null}
+        batchName={reorderPositionTarget?.batch_name ?? null}
         brandId={brandId}
         onApplied={onStatusChange}
       />

@@ -52,10 +52,12 @@ export type ReorderResponse =
     }
   | { ok: false; error: string };
 
+export type BatchPosition = "first" | "last";
+
 export async function reorderImportMedia(
   brandId: string,
   importId: string,
-  options?: { dryRun?: boolean },
+  options?: { dryRun?: boolean; batchPosition?: BatchPosition },
 ): Promise<ReorderResponse> {
   const {
     data: { session },
@@ -74,6 +76,7 @@ export async function reorderImportMedia(
       brand_id: brandId,
       import_id: importId,
       dry_run: options?.dryRun === true,
+      ...(options?.batchPosition ? { batch_position: options.batchPosition } : {}),
     },
     headers: { Authorization: `Bearer ${session.access_token}` },
   });

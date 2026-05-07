@@ -27,6 +27,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllImportImageRows } from "@/lib/fetch-all-import-images";
@@ -84,6 +91,7 @@ interface MappedProduct {
 }
 
 export type UploadMode = "append" | "replace";
+export type BatchPosition = "first" | "last";
 
 interface SendApprovalDialogProps {
   open: boolean;
@@ -94,6 +102,7 @@ interface SendApprovalDialogProps {
     products: WebhookProduct[],
     mode: UploadMode,
     backup: boolean,
+    batchPosition: BatchPosition,
   ) => void;
   isSending: boolean;
   onDataChange?: () => void;
@@ -594,6 +603,7 @@ export function SendApprovalDialog({
   const [galleryEditorFor, setGalleryEditorFor] = useState<number | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [backup, setBackup] = useState(true);
+  const [batchPosition, setBatchPosition] = useState<BatchPosition>("last");
   const { toast } = useToast();
 
   const fetchMapData = useCallback(async (opts?: { bypassCache?: boolean }) => {
@@ -844,7 +854,7 @@ export function SendApprovalDialog({
 
   const handleConfirm = (mode: UploadMode) => {
     setConfirmOpen(false);
-    onApprove(imp, buildPayload(), mode, backup);
+    onApprove(imp, buildPayload(), mode, backup, batchPosition);
   };
 
   const galleryProduct =
@@ -1121,6 +1131,30 @@ export function SendApprovalDialog({
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="flex items-center gap-3 py-2">
+            <label className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              Position
+            </label>
+            <Select
+              value={batchPosition}
+              onValueChange={(v) => setBatchPosition(v as BatchPosition)}
+            >
+              <SelectTrigger className="h-9 w-40 font-mono text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="first" className="font-mono text-xs">
+                  First (priority)
+                </SelectItem>
+                <SelectItem value="last" className="font-mono text-xs">
+                  Last (after existing)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-muted-foreground">
+              Where this batch's images sit relative to media from earlier imports on the same product.
+            </span>
+          </div>
           <AlertDialogFooter className="gap-2">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction

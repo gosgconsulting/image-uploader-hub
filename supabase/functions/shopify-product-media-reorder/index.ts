@@ -301,6 +301,8 @@ function detectColorOption(product: ProductFull): {
   return resolveColorOption(product, filenames);
 }
 
+type BatchPosition = "first" | "last";
+
 /**
  * Variant-aware order: group media by detected color (matched against the product's
  * actual color option values), order groups by the variant order, then within each
@@ -324,6 +326,10 @@ function detectColorOption(product: ProductFull): {
 function computeProposedOrder(
   product: ProductFull,
   colorOpt: { optionName: string; values: string[] } | null,
+  batchCtx?: {
+    batchPosition: BatchPosition;
+    importFilenames: Set<string>;
+  },
 ): {
   sorted: MediaNode[];
   colorByMediaId: Map<string, string | null>;
@@ -332,19 +338,30 @@ function computeProposedOrder(
   const nodes = product.media.nodes;
   const knownColors = colorOpt?.values ?? [];
 
-  // Pass 1: parse each media's filename → {color, view, position}.
+  // Pass 1: parse each media's filename → {color, view, position, batchTier}.
+  // batchTier sorts media from this import before/after media from earlier imports
+  // *within* the same color/view bucket. 0 sorts earlier than 1.
   const decorated = nodes.map((n, originalIdx) => {
     const fname = filenameFor(n);
     const parsed = parseProductImageFilename(fname, knownColors);
     // Fall back to legacy regex if parser couldn't find a position.
     const position =
       parsed.position !== 999 ? parsed.position : trailingIndex(fname);
+    let batchTier = 0;
+    if (batchCtx) {
+      const inThisImport = batchCtx.importFilenames.has(fname.toLowerCase());
+      // first: this import's media tier 0 (earlier), others tier 1.
+      // last:  this import's media tier 1 (later),   others tier 0.
+      if (batchCtx.batchPosition === "first") batchTier = inThisImport ? 0 : 1;
+      else batchTier = inThisImport ? 1 : 0;
+    }
     return {
       node: n,
       originalIdx,
       color: parsed.color,
       view: parsed.view,
       position,
+      batchTier,
     };
   });
 
@@ -364,6 +381,9 @@ function computeProposedOrder(
     const aView = viewOrder(a.view);
     const bView = viewOrder(b.view);
     if (aView !== bView) return aView - bView;
+    // Batch tier sorts before position so a "first" batch's #2 still sits ahead
+    // of an earlier batch's #1 within the same color/view.
+    if (a.batchTier !== b.batchTier) return a.batchTier - b.batchTier;
     if (a.position !== b.position) return a.position - b.position;
     return a.originalIdx - b.originalIdx;
   });
@@ -550,6 +570,7 @@ async function previewProduct(
   shopHost: string,
   accessToken: string,
   productId: string,
+  batchCtx?: { batchPosition: BatchPosition; importFilenames: Set<string> },
 ): Promise<ReorderResult> {
   const fetched = await fetchProduct(shopHost, accessToken, productId);
   if (!fetched.ok) return { product_id: productId, moved: 0, error: fetched.error };
@@ -569,7 +590,7 @@ async function previewProduct(
       )} sample_filenames=${JSON.stringify(candidateSamples)}`,
     );
   }
-  const { sorted, colorByMediaId, movedCount } = computeProposedOrder(product, colorOpt);
+  const { sorted, colorByMediaId, movedCount } = computeProposedOrder(product, colorOpt, batchCtx);
 
   const current = nodes.map((n, i) => summarize(n, i + 1, colorByMediaId.get(n.id) ?? null));
   const proposed = sorted.map((n, i) => summarize(n, i + 1, colorByMediaId.get(n.id) ?? null));
@@ -597,6 +618,7 @@ async function applyProduct(
   shopHost: string,
   accessToken: string,
   productId: string,
+  batchCtx?: { batchPosition: BatchPosition; importFilenames: Set<string> },
 ): Promise<ReorderResult> {
   let fetched = await fetchProduct(shopHost, accessToken, productId);
   if (!fetched.ok) return { product_id: productId, moved: 0, error: fetched.error };
@@ -658,7 +680,7 @@ async function applyProduct(
   }
 
   const colorOpt = detectColorOption(product);
-  const { sorted, colorByMediaId, movedCount } = computeProposedOrder(product, colorOpt);
+  const { sorted, colorByMediaId, movedCount } = computeProposedOrder(product, colorOpt, batchCtx);
   const variantUpdates = buildVariantMediaUpdates(product, colorOpt, sorted, colorByMediaId);
   const associations = buildVariantMediaAssociations(product, colorOpt, colorByMediaId);
 
@@ -856,7 +878,12 @@ serve(async (req) => {
     userId = user.id;
   }
 
-  let body: { brand_id?: string; import_id?: string; dry_run?: boolean };
+  let body: {
+    brand_id?: string;
+    import_id?: string;
+    dry_run?: boolean;
+    batch_position?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -868,6 +895,9 @@ serve(async (req) => {
     typeof body.import_id === "string" ? body.import_id.trim() : "";
   if (!importId) return json({ error: "import_id required" }, 400);
   const dryRun = body.dry_run === true;
+  const rawPos = typeof body.batch_position === "string" ? body.batch_position.trim().toLowerCase() : "";
+  const batchPosition: BatchPosition | null =
+    rawPos === "first" ? "first" : rawPos === "last" ? "last" : null;
 
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -911,24 +941,38 @@ serve(async (req) => {
 
   // Paginate so a >1000-image import isn't truncated by the PostgREST cap —
   // otherwise products whose rows fall past the cap wouldn't get reordered.
+  // Also collect file_name in the same pass so we can build the batch tier set
+  // when batch_position is provided (matched case-insensitively against media alts).
   const PAGE = 1000;
   const productIdSet = new Set<string>();
+  const importFilenames = new Set<string>();
   for (let from = 0; ; from += PAGE) {
     const { data: rows, error: rowsErr } = await admin
       .from("shopify_import_images")
-      .select("shopify_product_id")
+      .select("shopify_product_id, file_name")
       .eq("import_id", importId)
       .not("shopify_product_id", "is", null)
       .range(from, from + PAGE - 1);
     if (rowsErr) return json({ error: rowsErr.message }, 500);
     const batch = rows ?? [];
     for (const r of batch) {
-      const v = (r as { shopify_product_id: string | null }).shopify_product_id;
-      if (typeof v === "string" && v.length > 0) productIdSet.add(v);
+      const row = r as {
+        shopify_product_id: string | null;
+        file_name: string | null;
+      };
+      if (typeof row.shopify_product_id === "string" && row.shopify_product_id.length > 0) {
+        productIdSet.add(row.shopify_product_id);
+      }
+      if (typeof row.file_name === "string" && row.file_name.length > 0) {
+        importFilenames.add(row.file_name.toLowerCase());
+      }
     }
     if (batch.length < PAGE) break;
   }
   const productIds = Array.from(productIdSet);
+  const batchCtx = batchPosition
+    ? { batchPosition, importFilenames }
+    : undefined;
   if (productIds.length === 0) {
     return json({
       ok: true,
@@ -944,7 +988,7 @@ serve(async (req) => {
   }
 
   console.log(
-    `[shopify-product-media-reorder] import=${importId} products=${productIds.length} dry_run=${dryRun}`,
+    `[shopify-product-media-reorder] import=${importId} products=${productIds.length} dry_run=${dryRun} batch_position=${batchPosition ?? "none"}`,
   );
 
   const accessToken = cred.access_token as string;
@@ -953,8 +997,8 @@ serve(async (req) => {
     productIds.length,
     (idx) =>
       dryRun
-        ? previewProduct(shopDomain, accessToken, productIds[idx])
-        : applyProduct(shopDomain, accessToken, productIds[idx]),
+        ? previewProduct(shopDomain, accessToken, productIds[idx], batchCtx)
+        : applyProduct(shopDomain, accessToken, productIds[idx], batchCtx),
   );
 
   const totalMoved = results.reduce((acc, r) => acc + r.moved, 0);
